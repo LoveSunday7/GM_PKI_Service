@@ -11,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.admin_user import AdminUser
 from app.routers.auth import CurrentUser, get_current_user, hash_password
-from app.schemas.admin import AdminUserListItem, CreateAdminUserRequest, CreateAdminUserResponse, DeleteAdminUserResponse
+from app.schemas.admin import (
+    AdminUserListItem,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
+    CreateAdminUserRequest,
+    CreateAdminUserResponse,
+    DeleteAdminUserResponse,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
 logger = logging.getLogger(__name__)
@@ -87,5 +94,33 @@ async def delete_admin_user(
     return DeleteAdminUserResponse(
         success=True,
         message=f"管理员用户 {username} 已删除",
+        username=username,
+    )
+
+
+@router.put("/users/{username}/password", response_model=ChangePasswordResponse)
+async def change_admin_password(
+    username: str,
+    payload: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ChangePasswordResponse:
+    """修改管理员用户密码（需登录）."""
+    # 查找用户
+    stmt = select(AdminUser).where(AdminUser.username == username)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"用户 {username} 不存在")
+
+    # 更新密码哈希
+    user.password_hash = hash_password(payload.new_password)
+    await db.flush()
+
+    logger.info("管理员 %s 修改了用户 %s 的密码", current_user.username, username)
+
+    return ChangePasswordResponse(
+        success=True,
+        message=f"用户 {username} 密码已更新",
         username=username,
     )

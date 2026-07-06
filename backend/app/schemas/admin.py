@@ -56,3 +56,21 @@ class DeleteAdminUserResponse(BaseModel):
     success: bool = Field(description="是否成功")
     message: str = Field(description="结果描述")
     username: str = Field(description="被删除的用户名")
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求体."""
+
+    new_password: str = Field(
+        min_length=6,
+        max_length=128,
+        description="新密码（至少 6 位）",
+    )
+
+
+class ChangePasswordResponse(BaseModel):
+    """修改密码响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    username: str = Field(description="用户名")

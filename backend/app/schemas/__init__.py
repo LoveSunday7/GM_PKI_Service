@@ -1,6 +1,6 @@
 """按业务域分组的 Pydantic 数据模型."""
 
-from app.schemas.admin import AdminUserListItem, CreateAdminUserRequest, CreateAdminUserResponse, DeleteAdminUserResponse
+from app.schemas.admin import AdminUserListItem, ChangePasswordRequest, ChangePasswordResponse, CreateAdminUserRequest, CreateAdminUserResponse, DeleteAdminUserResponse
 from app.schemas.auth import LoginRequest, LoginResponse, LogoutResponse
 from app.schemas.ca import (
     CAInitRequest,
@@ -55,6 +55,8 @@ __all__ = [
     "CreateAdminUserResponse",
     "AdminUserListItem",
     "DeleteAdminUserResponse",
+    "ChangePasswordRequest",
+    "ChangePasswordResponse",
     # 通用
     "SuccessResponse",
     "ErrorResponse",
