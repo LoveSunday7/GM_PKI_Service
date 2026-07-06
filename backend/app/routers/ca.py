@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -41,9 +40,6 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
     result = await db.execute(stmt)
     if result.scalars().first() is not None:
         raise HTTPException(status_code=409, detail="CA 已经初始化")
-
-    # 确保密钥库目录存在
-    os.makedirs(settings.keystore_dir, exist_ok=True)
 
     # 生成根密钥对
     public_pem, private_pem, _ = generate_sm2_keypair()

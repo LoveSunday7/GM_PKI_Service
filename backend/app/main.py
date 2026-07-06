@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # 确保 backend 目录在 sys.path 中，支持 python app/main.py 直接运行
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,15 +23,31 @@ from app.routers import auth, ca, crl, user_cert
 # ── 初始化日志系统 ─────────────────────────────────────────────────
 setup_logging()
 
-import logging
-import time
-
 logger = logging.getLogger(__name__)
+
+
+def _ensure_keystore() -> None:
+    """创建密钥库目录并校验读写权限."""
+    keystore = settings.keystore_dir
+    try:
+        os.makedirs(keystore, exist_ok=True)
+    except OSError as exc:
+        logger.critical("无法创建密钥库目录 %s: %s", keystore, exc)
+        raise
+
+    # 权限检查：目录是否存在且可读写
+    if not os.path.isdir(keystore):
+        raise NotADirectoryError(f"密钥库路径不是目录: {keystore}")
+    if not os.access(keystore, os.R_OK | os.W_OK):
+        raise PermissionError(f"密钥库目录权限不足（需要读写权限）: {keystore}")
+
+    logger.info("密钥库目录就绪: %s", keystore)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时自动创建数据库表，关闭时释放引擎."""
+    """启动时创建数据库表 + 密钥库目录，关闭时释放引擎."""
+    _ensure_keystore()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

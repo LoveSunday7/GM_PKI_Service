@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite+aiosqlite:///{_default_db_path}"
 
     # ── 密钥库 ────────────────────────────────────────────────────
-    keystore_dir: str = os.path.join(Path(__file__).resolve().parent.parent, "keystore")
+    # 可通过 KEYSTORE_DIR 环境变量覆盖，否则默认 <backend>/keystore/
+    keystore_dir: str = str(Path(__file__).resolve().parent.parent / "keystore")
 
     # ── CA 默认配置 ──────────────────────────────────────────────
     ca_default_validity_days: int = 3650  # 10年
