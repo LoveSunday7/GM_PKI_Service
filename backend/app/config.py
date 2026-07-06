@@ -16,9 +16,10 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── 数据库 ────────────────────────────────────────────────────
-    # 开发环境: sqlite+aiosqlite:///./data.db
+    # 开发环境: sqlite+aiosqlite:///<backend>/data.db
     # 生产环境: mysql+aiomysql://user:pass@host:3306/gm_pki
-    database_url: str = "sqlite+aiosqlite:///./data.db"
+    _default_db_path = str(Path(__file__).resolve().parent.parent / "data.db")
+    database_url: str = f"sqlite+aiosqlite:///{_default_db_path}"
 
     # ── 密钥库 ────────────────────────────────────────────────────
     keystore_dir: str = os.path.join(Path(__file__).resolve().parent.parent, "keystore")
