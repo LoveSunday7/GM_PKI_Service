@@ -7,7 +7,9 @@ interface CRLInfo {
   issuer_dn: string
   this_update: string
   next_update: string
+  signature_algorithm: string
   revoked_count: number
+  crl_pem: string
   revoked_certificates: Array<{
     cert_serial_number: string
     reason: string
@@ -27,7 +29,12 @@ export const useCRLStore = defineStore('crl', () => {
   }
 
   async function fetchCurrent() {
-    currentCRL.value = (await crlApi.current()) as CRLInfo
+    const data = await crlApi.current()
+    if ('crl_number' in data && data.crl_number) {
+      currentCRL.value = data as unknown as CRLInfo
+    } else {
+      currentCRL.value = null
+    }
     return currentCRL.value
   }
 

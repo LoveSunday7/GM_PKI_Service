@@ -12,6 +12,7 @@ const certStore = useCertStore()
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+const crlCopied = ref(false)
 
 // ── 序列号自动补全 ─────────────────────────────────────────────
 const showSuggestions = ref(false)
@@ -98,6 +99,21 @@ async function handleDownload() {
     error.value = e instanceof Error ? e.message : '下载失败'
   }
 }
+
+async function copyCRLPEM(pem: string) {
+  try {
+    await navigator.clipboard.writeText(pem)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = pem
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  crlCopied.value = true
+  setTimeout(() => { crlCopied.value = false }, 2000)
+}
 </script>
 
 <template>
@@ -171,6 +187,17 @@ async function handleDownload() {
         </div>
         <div class="crl-actions">
           <button class="btn-sm" @click="handleDownload">⬇ 下载 CRL</button>
+        </div>
+
+        <!-- CRL PEM 预览 -->
+        <div class="crl-pem" v-if="crlStore.currentCRL.crl_pem">
+          <details>
+            <summary>证书吊销列表 PEM</summary>
+            <pre class="pem-preview">{{ (crlStore.currentCRL.crl_pem as string)?.slice(0, 500) }}{{ (crlStore.currentCRL.crl_pem as string)?.length > 500 ? '...' : '' }}</pre>
+            <button class="btn-copy" @click="copyCRLPEM(crlStore.currentCRL.crl_pem as string)">
+              {{ crlCopied ? '✅ 已复制' : '📋 复制 PEM' }}
+            </button>
+          </details>
         </div>
 
         <!-- 撤销列表 -->
@@ -298,6 +325,33 @@ code {
 .empty { color: #888; font-style: italic; }
 .crl-actions { margin-top: 0.75rem; }
 .btn-sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; background: #555; }
+
+/* CRL PEM */
+.crl-pem { margin-top: 0.75rem; }
+.crl-pem details { font-size: 0.85rem; }
+.crl-pem summary { cursor: pointer; color: #0f3460; font-weight: 500; margin-bottom: 0.4rem; }
+.pem-preview {
+  background: #f8f8f8;
+  padding: 0.5rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: 0.4rem;
+}
+.btn-copy {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  background: transparent;
+  color: #0f3460;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
 
 /* 自动补全 */
 .autocomplete-wrapper { position: relative; }
