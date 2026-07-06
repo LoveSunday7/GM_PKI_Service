@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { systemApi, type DatabaseInfo, type KeystoreInfo, type SystemConfig } from '@/api'
+import { systemApi, type DatabaseInfo, type KeystoreInfo, type LogQueryResponse, type SystemConfig } from '@/api'
 
 defineOptions({ name: 'SettingsPage' })
 
@@ -10,6 +10,14 @@ const config = ref<SystemConfig | null>(null)
 const keystoreInfo = ref<KeystoreInfo | null>(null)
 const dbInfo = ref<DatabaseInfo | null>(null)
 const error = ref('')
+
+// ── 日志查看 ───────────────────────────────────────────────────
+const LOG_FILTER_LEVELS = ['', 'DEBUG', 'INFO', 'WARNING', 'ERROR']
+const logData = ref<LogQueryResponse | null>(null)
+const logLines = ref(100)
+const logLevel = ref('')
+const logLoading = ref(false)
+const logError = ref('')
 
 // ── 日志级别 ───────────────────────────────────────────────────
 const LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR']
@@ -98,6 +106,28 @@ async function saveParams() {
   } finally {
     paramSaving.value = false
   }
+}
+
+// ── 日志查看 ───────────────────────────────────────────────────
+async function fetchLogs() {
+  logLoading.value = true
+  logError.value = ''
+  try {
+    const params: { lines?: number; level?: string } = { lines: logLines.value }
+    if (logLevel.value) params.level = logLevel.value
+    logData.value = await systemApi.getLogs(params)
+  } catch (e: unknown) {
+    logError.value = e instanceof Error ? e.message : '加载日志失败'
+    logData.value = null
+  } finally {
+    logLoading.value = false
+  }
+}
+
+function handleDownloadLogs() {
+  systemApi.downloadLogs().catch(e => {
+    logError.value = e instanceof Error ? e.message : '下载失败'
+  })
 }
 </script>
 
@@ -287,6 +317,47 @@ async function saveParams() {
           {{ paramMsg }}
         </p>
       </section>
+
+      <!-- ── 日志查看卡片 ────────────────────────────────── -->
+      <section class="card">
+        <h3 class="card-title">📄 日志查看</h3>
+        <!-- 工具栏 -->
+        <div class="log-toolbar">
+          <div class="toolbar-left">
+            <label class="toolbar-label">
+              行数
+              <input v-model.number="logLines" type="number" min="1" max="10000" class="toolbar-input-num" />
+            </label>
+            <label class="toolbar-label">
+              级别
+              <select v-model="logLevel" class="toolbar-select">
+                <option v-for="lv in LOG_FILTER_LEVELS" :key="lv" :value="lv">
+                  {{ lv || '全部' }}
+                </option>
+              </select>
+            </label>
+            <button class="btn btn-sm btn-primary" :disabled="logLoading" @click="fetchLogs">
+              {{ logLoading ? '⏳ 查询中...' : '🔍 查询' }}
+            </button>
+          </div>
+          <div class="toolbar-right">
+            <button class="btn btn-sm btn-outline" @click="handleDownloadLogs">⬇️ 下载完整日志</button>
+          </div>
+        </div>
+
+        <!-- 状态信息 -->
+        <div v-if="logData" class="log-stats">
+          <span>文件: <code>{{ logData.log_file.split('/').pop() }}</code></span>
+          <span>总行数: {{ logData.total_lines }}</span>
+          <span>显示: {{ logData.lines.length }} 行</span>
+          <span v-if="logData.level_filter">级别过滤: {{ logData.level_filter }}</span>
+        </div>
+
+        <!-- 日志内容 -->
+        <div v-if="logError" class="log-error">{{ logError }}</div>
+        <pre v-else-if="logData" class="log-viewer"><code>{{ logData.lines.join('\n') || '(空)' }}</code></pre>
+        <p v-else class="log-placeholder">点击"查询"加载日志</p>
+      </section>
     </template>
   </div>
 </template>
@@ -459,4 +530,107 @@ async function saveParams() {
 }
 .msg-ok { background: #d4edda; color: #155724; }
 .msg-warn { background: #fff3cd; color: #856404; }
+
+/* ── 日志查看 ──────────────────────────────────────── */
+.log-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.toolbar-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: #666;
+}
+.toolbar-input-num {
+  width: 70px;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.toolbar-select {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: #fff;
+}
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-sm:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-outline {
+  background: transparent;
+  color: #0f3460;
+  border: 1px solid #0f3460;
+}
+.btn-outline:hover { background: rgba(15, 52, 96, 0.06); }
+
+.log-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.78rem;
+  color: #888;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+.log-stats code { font-size: 0.75rem; }
+
+.log-error {
+  color: #dc3545;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+  background: #fff5f5;
+  border-radius: 4px;
+}
+
+.log-viewer {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow: auto;
+  white-space: pre;
+  margin: 0;
+}
+.log-viewer code {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: inherit;
+  background: none;
+  padding: 0;
+}
+
+.log-placeholder {
+  color: #aaa;
+  font-style: italic;
+  text-align: center;
+  padding: 2rem;
+}
 </style>

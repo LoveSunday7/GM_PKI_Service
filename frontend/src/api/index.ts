@@ -274,6 +274,14 @@ export interface DatabaseInfo {
   total_rows: number
 }
 
+export interface LogQueryResponse {
+  log_file: string
+  total_lines: number
+  requested_lines: number
+  level_filter: string | null
+  lines: string[]
+}
+
 export const systemApi = {
   getConfig: () =>
     request<SystemConfig>('/system/config'),
@@ -283,6 +291,17 @@ export const systemApi = {
 
   getDatabase: () =>
     request<DatabaseInfo>('/system/database'),
+
+  getLogs: (params?: { lines?: number; level?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.lines) qs.set('lines', String(params.lines))
+    if (params?.level) qs.set('level', params.level)
+    const q = qs.toString()
+    return request<LogQueryResponse>(`/system/logs${q ? `?${q}` : ''}`)
+  },
+
+  downloadLogs: () =>
+    download('/system/logs/download', 'app.log'),
 
   updateLogLevel: (level: string) =>
     request<{ success: boolean; previous_level: string; current_level: string; message: string }>(
