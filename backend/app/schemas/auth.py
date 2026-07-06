@@ -19,3 +19,9 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     username: str
     role: str
+
+
+class LogoutResponse(BaseModel):
+    """登出响应."""
+    success: bool = True
+    message: str = "已成功登出"
