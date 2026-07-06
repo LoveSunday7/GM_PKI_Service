@@ -18,6 +18,7 @@ const navItems = [
   { to: '/crl', label: 'CRL', icon: '🚫' },
   { to: '/verify', label: '证书验证', icon: '🔍' },
   { to: '/ocsp', label: 'OCSP', icon: '🟢' },
+  { to: '/admin-users', label: '管理员', icon: '👥' },
   { to: '/settings', label: '系统设置', icon: '⚙️' },
 ]
 </script>

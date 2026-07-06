@@ -321,6 +321,40 @@ export const systemApi = {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 管理员用户管理
+// ═══════════════════════════════════════════════════════════════
+
+export interface AdminUserItem {
+  id: string
+  username: string
+  role: string
+  created_at: string
+}
+
+export const adminApi = {
+  list: () =>
+    request<AdminUserItem[]>('/admin/users'),
+
+  create: (data: { username: string; password: string; role: string }) =>
+    request<{ success: boolean; message: string; username: string; role: string }>(
+      '/admin/users',
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+
+  delete: (username: string) =>
+    request<{ success: boolean; message: string; username: string }>(
+      `/admin/users/${username}`,
+      { method: 'DELETE' },
+    ),
+
+  changePassword: (username: string, newPassword: string) =>
+    request<{ success: boolean; message: string; username: string }>(
+      `/admin/users/${username}/password`,
+      { method: 'PUT', body: JSON.stringify({ new_password: newPassword }) },
+    ),
+}
+
+// ═══════════════════════════════════════════════════════════════
 // CRL 撤销列表
 // ═══════════════════════════════════════════════════════════════
 

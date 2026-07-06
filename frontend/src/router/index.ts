@@ -49,6 +49,12 @@ const router = createRouter({
       meta: { requiresAuth: true, title: 'OCSP 查询' },
     },
     {
+      path: '/admin-users',
+      name: 'AdminUsers',
+      component: () => import('@/views/AdminUsers.vue'),
+      meta: { requiresAuth: true, title: '管理员' },
+    },
+    {
       path: '/settings',
       name: 'Settings',
       component: () => import('@/views/Settings.vue'),
