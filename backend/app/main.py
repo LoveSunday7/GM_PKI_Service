@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, check_db, engine
+from app.exceptions import register_exception_handlers
 from app.logging_config import setup_logging
 from app.routers import auth, ca, crl, user_cert
 
@@ -71,6 +72,9 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_tags=_tags_metadata,
 )
+
+# ── 统一异常处理 ─────────────────────────────────────────────────
+register_exception_handlers(app)
 
 # ── 跨域配置 ─────────────────────────────────────────────────────
 app.add_middleware(
