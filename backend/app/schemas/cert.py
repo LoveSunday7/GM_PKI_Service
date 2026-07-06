@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class CertIssueRequest(BaseModel):
     """签发用户证书的请求体."""
 
-    user_name: str = Field(max_length=128, description="用户姓名（作为证书 Common Name）")
+    user_name: str = Field(min_length=1, max_length=128, description="用户姓名（作为证书 Common Name）")
     email: str | None = Field(default=None, max_length=255, description="邮箱")
     organization: str | None = Field(default=None, max_length=255, description="组织名称")
     department: str | None = Field(default=None, max_length=255, description="部门")
