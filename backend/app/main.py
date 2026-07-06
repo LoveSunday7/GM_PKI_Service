@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, check_db, engine
 from app.logging_config import setup_logging
 from app.routers import auth, ca, crl, user_cert
 
@@ -96,8 +96,13 @@ app.include_router(crl.router)
 
 @app.get("/api/health")
 async def health_check():
-    """存活 / 就绪探测."""
-    return {"status": "ok", "service": settings.app_name}
+    """存活 / 就绪探测（含数据库连通性检查）."""
+    db_status = await check_db()
+    return {
+        "status": "ok" if db_status["status"] == "ok" else "degraded",
+        "service": settings.app_name,
+        "database": db_status,
+    }
 
 
 # ── 直接运行入口 ─────────────────────────────────────────────────
