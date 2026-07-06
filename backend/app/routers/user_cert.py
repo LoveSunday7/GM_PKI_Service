@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -119,6 +119,33 @@ async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_d
         key_pem=private_pem,
         root_cert_pem=root_cert.cert_pem,
     )
+
+
+@router.get("/stats")
+async def cert_stats(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    """仪表盘统计数据."""
+    total_stmt = select(sqlfunc.count(UserCert.id))
+    total = (await db.execute(total_stmt)).scalar() or 0
+    active_stmt = select(sqlfunc.count(UserCert.id)).where(UserCert.status == "active")
+    active = (await db.execute(active_stmt)).scalar() or 0
+    revoked_stmt = select(sqlfunc.count(UserCert.id)).where(UserCert.status == "revoked")
+    revoked = (await db.execute(revoked_stmt)).scalar() or 0
+    sign_stmt = select(sqlfunc.count(UserCert.id)).where(UserCert.cert_type == "sign")
+    sign = (await db.execute(sign_stmt)).scalar() or 0
+    encrypt_stmt = select(sqlfunc.count(UserCert.id)).where(UserCert.cert_type == "encrypt")
+    encrypt = (await db.execute(encrypt_stmt)).scalar() or 0
+
+    from datetime import datetime as dt, timedelta, timezone as tz
+    threshold = dt.now(tz.utc) + timedelta(days=30)
+    expiring_stmt = select(sqlfunc.count(UserCert.id)).where(
+        UserCert.status == "active", UserCert.not_after <= threshold
+    )
+    expiring = (await db.execute(expiring_stmt)).scalar() or 0
+
+    return {
+        "total": total, "active": active, "revoked": revoked,
+        "sign": sign, "encrypt": encrypt, "expiring_soon": expiring,
+    }
 
 
 @router.get("/list", response_model=list[CertListItem])
