@@ -2,9 +2,34 @@
 
 const BASE = '/api'
 const TOKEN_KEY = 'gm_pki_token'
+const USER_KEY = 'gm_pki_user'
+
+/** 401 时触发跳转登录页的回调，由路由模块注入. */
+let onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(handler: () => void) {
+  onUnauthorized = handler
+}
 
 function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
+}
+
+/** 解析 JWT 获取过期时间，若无法解析或已过期返回 true. */
+export function isTokenExpired(): boolean {
+  const token = getToken()
+  if (!token) return true
+  try {
+    const parts = token.split('.')
+    const payloadBase64 = parts[1]
+    if (!payloadBase64) return true
+    const payload = JSON.parse(atob(payloadBase64))
+    const exp: number | undefined = payload.exp
+    if (!exp) return true
+    return Date.now() >= exp * 1000
+  } catch {
+    return true
+  }
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -15,9 +40,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   }
   const res = await fetch(`${BASE}${url}`, { ...options, headers })
   if (!res.ok) {
-    // 401 — clear stale token
     if (res.status === 401) {
       localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(USER_KEY)
+      onUnauthorized?.()
     }
     const body = await res.json().catch(() => ({ message: res.statusText }))
     throw new Error(body.message || body.detail || `HTTP ${res.status}`)

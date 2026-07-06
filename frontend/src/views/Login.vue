@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
@@ -10,6 +11,9 @@ const username = ref('')
 const password = ref('')
 const submitting = ref(false)
 const errorMsg = ref('')
+
+// 来自路由守卫的提示信息
+const expiredMsg = route.query.reason === 'expired' ? '会话已过期，请重新登录' : ''
 
 async function handleLogin() {
   if (!username.value.trim() || !password.value.trim()) {
@@ -20,7 +24,9 @@ async function handleLogin() {
   errorMsg.value = ''
   try {
     await authStore.login(username.value.trim(), password.value)
-    router.replace({ name: 'Dashboard' })
+    // 登录成功后跳转到原始目标页或首页
+    const redirect = route.query.redirect as string | undefined
+    router.replace(redirect || { name: 'Dashboard' })
   } catch (e: any) {
     errorMsg.value = e.message || '登录失败，请检查用户名和密码'
   } finally {
@@ -36,6 +42,7 @@ async function handleLogin() {
         <h1>GM PKI Service</h1>
         <p>基于国密算法的 PKI 体系数字证书认证系统</p>
       </div>
+      <p v-if="expiredMsg" class="info-msg">{{ expiredMsg }}</p>
       <form class="login-form" @submit.prevent="handleLogin">
         <div class="field">
           <label for="username">用户名</label>
@@ -137,6 +144,16 @@ async function handleLogin() {
 .field input:disabled {
   background: #f5f5f5;
   cursor: not-allowed;
+}
+
+.info-msg {
+  color: #e65100;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 0.5rem;
+  background: #fff3e0;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
 }
 
 .error-msg {
