@@ -24,6 +24,12 @@ from app.schemas.crl import (
     CRLRevokeResponse,
 )
 from app.schemas.common import ErrorResponse, SuccessResponse
+from app.schemas.verify import (
+    CertVerifyRequest,
+    CertVerifyResponse,
+    CRLVerifyRequest,
+    CRLVerifyResponse,
+)
 
 __all__ = [
     # 认证

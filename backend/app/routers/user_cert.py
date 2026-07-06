@@ -22,11 +22,19 @@ from app.schemas.cert import (
     CertListItem,
     CertStatusResponse,
 )
+from app.schemas.verify import (
+    CertVerifyRequest,
+    CertVerifyResponse,
+    CRLVerifyRequest,
+    CRLVerifyResponse,
+)
 from app.services.crypto import (
     build_dn,
     build_user_cert,
     generate_serial_number,
     generate_sm2_keypair,
+    verify_cert_chain,
+    verify_cert_against_crl,
 )
 
 router = APIRouter(prefix="/api/cert", tags=["用户证书"])
@@ -193,3 +201,18 @@ async def check_cert_status(
             response.reason = rev.reason
 
     return response
+
+
+# ── 证书验证 ──────────────────────────────────────────────────
+
+
+@router.post("/verify", response_model=CertVerifyResponse)
+async def verify_certificate(payload: CertVerifyRequest, _user: CurrentUser = Depends(get_current_user)):
+    """验证证书签名链 — 传入证书 + 上级证书，返回验证结果."""
+    return verify_cert_chain(payload.cert_pem, payload.issuer_cert_pem)
+
+
+@router.post("/verify-revocation", response_model=CRLVerifyResponse)
+async def verify_certificate_revocation(payload: CRLVerifyRequest, _user: CurrentUser = Depends(get_current_user)):
+    """CRL 撤销验证 — 传入证书 PEM + CRL PEM，验证是否已撤销."""
+    return verify_cert_against_crl(payload.cert_pem, payload.crl_pem)

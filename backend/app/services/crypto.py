@@ -322,6 +322,97 @@ def list_keystore_files() -> list[str]:
         return []
 
 
+# ──────────────────────────────────────────────────────────────────
+# 证书验证
+# ──────────────────────────────────────────────────────────────────
+
+
+def verify_cert_chain(cert_pem: str, issuer_cert_pem: str) -> dict:
+    """验证证书签名链 — 使用上级证书公钥验证下级证书签名.
+
+    Args:
+        cert_pem: 待验证证书 PEM
+        issuer_cert_pem: 签发者（上级）证书 PEM
+
+    Returns:
+        {"valid": bool, "details": str, "cert_subject": str, "issuer_subject": str}
+    """
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode())
+        issuer = x509.load_pem_x509_certificate(issuer_cert_pem.encode())
+
+        # 验证签名（EC 证书使用 ECDSA-SHA256）
+        issuer.public_key().verify(
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            ec.ECDSA(hashes.SHA256()),
+        )
+
+        # 验证时间
+        now = datetime.now(timezone.utc)
+        is_in_validity = cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
+
+        return {
+            "valid": True,
+            "details": "证书签名有效" + ("，在有效期内" if is_in_validity else "，但已过期或尚未生效"),
+            "cert_subject": cert.subject.rfc4514_string(),
+            "issuer_subject": issuer.subject.rfc4514_string(),
+            "serial_number": format(cert.serial_number, "x"),
+            "not_before": cert.not_valid_before_utc.isoformat() if cert.not_valid_before_utc else None,
+            "not_after": cert.not_valid_after_utc.isoformat() if cert.not_valid_after_utc else None,
+            "in_validity_period": is_in_validity,
+        }
+    except Exception as exc:
+        return {
+            "valid": False,
+            "details": f"证书签名验证失败: {exc}",
+            "cert_subject": "",
+            "issuer_subject": "",
+            "serial_number": "",
+            "not_before": None,
+            "not_after": None,
+            "in_validity_period": False,
+        }
+
+
+def verify_cert_against_crl(cert_pem: str, crl_pem: str) -> dict:
+    """基于 CRL 验证证书是否已被撤销.
+
+    Args:
+        cert_pem: 待验证证书 PEM
+        crl_pem: CRL PEM 内容
+
+    Returns:
+        {"revoked": bool, "reason": str|None, "revocation_date": str|None}
+    """
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode())
+        crl = x509.load_pem_x509_crl(crl_pem.encode())
+
+        cert_serial = cert.serial_number
+
+        for revoked_entry in crl:
+            if revoked_entry.serial_number == cert_serial:
+                return {
+                    "revoked": True,
+                    "reason": str(revoked_entry.extensions) if revoked_entry.extensions else "证书已被撤销",
+                    "revocation_date": revoked_entry.revocation_date_utc.isoformat() if revoked_entry.revocation_date_utc else None,
+                }
+
+        return {
+            "revoked": False,
+            "reason": None,
+            "revocation_date": None,
+        }
+    except Exception as exc:
+        return {
+            "revoked": False,
+            "reason": f"CRL 解析失败: {exc}",
+            "revocation_date": None,
+            "error": str(exc),
+        }
+
+
 def extract_cert_info(cert_pem: str) -> dict:
     """从 X.509 证书 PEM 中提取关键字段用于展示."""
     cert = x509.load_pem_x509_certificate(cert_pem.encode())

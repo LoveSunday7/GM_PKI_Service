@@ -36,6 +36,12 @@ const router = createRouter({
       component: () => import('@/views/CRL.vue'),
       meta: { requiresAuth: true, title: 'CRL 管理' },
     },
+    {
+      path: '/verify',
+      name: 'CertVerify',
+      component: () => import('@/views/CertVerify.vue'),
+      meta: { requiresAuth: true, title: '证书验证' },
+    },
   ],
 })
 
