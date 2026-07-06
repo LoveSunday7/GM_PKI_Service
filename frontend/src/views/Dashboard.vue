@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+
+defineOptions({ name: 'DashboardPage' })
 import { useCAStore } from '@/stores/ca'
 import { useCertStore } from '@/stores/cert'
 import { useCRLStore } from '@/stores/crl'

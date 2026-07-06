@@ -34,11 +34,12 @@ async function handleIssue() {
     const payload: Record<string, unknown> = { ...form.value }
     if (!payload.public_key_pem) delete payload.public_key_pem
     const res = await certStore.issue(payload)
-    success.value = `Certificate issued! Serial: ${(res as any).serial_number?.slice(0, 20)}...`
+    const issueRes = res as { serial_number?: string }
+    success.value = `Certificate issued! Serial: ${issueRes.serial_number?.slice(0, 20)}...`
     form.value.user_name = ''
     form.value.email = ''
-  } catch (e: any) {
-    error.value = e.message || 'Issue failed'
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'Issue failed'
   } finally {
     loading.value = false
   }

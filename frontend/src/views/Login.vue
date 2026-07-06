@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+defineOptions({ name: 'LoginPage' })
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -27,8 +29,8 @@ async function handleLogin() {
     // 登录成功后跳转到原始目标页或首页
     const redirect = route.query.redirect as string | undefined
     router.replace(redirect || { name: 'Dashboard' })
-  } catch (e: any) {
-    errorMsg.value = e.message || '登录失败，请检查用户名和密码'
+  } catch (e: unknown) {
+    errorMsg.value = e instanceof Error ? e.message : '登录失败，请检查用户名和密码'
   } finally {
     submitting.value = false
   }

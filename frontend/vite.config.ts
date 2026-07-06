@@ -11,12 +11,19 @@ export default defineConfig({
     vueDevTools(),
   ],
   server: {
+    port: 5173,
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },
+  },
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+    sourcemap: false,
+    chunkSizeWarningLimit: 1000,
   },
   resolve: {
     alias: {

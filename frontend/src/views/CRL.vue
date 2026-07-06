@@ -28,12 +28,13 @@ async function handleRevoke() {
   success.value = ''
   try {
     const res = await crlStore.revoke(revokeForm.value)
-    success.value = `Revoked: ${(res as any).cert_serial_number?.slice(0, 20)}...`
+    const revokeRes = res as { cert_serial_number?: string }
+    success.value = `Revoked: ${revokeRes.cert_serial_number?.slice(0, 20)}...`
     revokeForm.value.cert_serial_number = ''
     await certStore.fetchList()
     await crlStore.fetchCurrent()
-  } catch (e: any) {
-    error.value = e.message || 'Revoke failed'
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'Revoke failed'
   } finally {
     loading.value = false
   }
@@ -44,11 +45,11 @@ async function handleGenerate() {
   error.value = ''
   success.value = ''
   try {
-    const res = await crlStore.generate()
-    success.value = `CRL #${(res as any).crl_number} generated with ${(res as any).revoked_count} revocations`
+    const genRes = await crlStore.generate() as { crl_number?: number; revoked_count?: number }
+    success.value = `CRL #${genRes.crl_number} generated with ${genRes.revoked_count} revocations`
     await crlStore.fetchCurrent()
-  } catch (e: any) {
-    error.value = e.message || 'CRL generation failed'
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'CRL generation failed'
   } finally {
     loading.value = false
   }

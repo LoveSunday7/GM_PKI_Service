@@ -27,8 +27,8 @@ async function handleInit() {
   try {
     await caStore.initialize(form.value)
     await caStore.fetchRootCerts()
-  } catch (e: any) {
-    error.value = e.message || 'Initialization failed'
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'Initialization failed'
   } finally {
     loading.value = false
   }

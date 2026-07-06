@@ -37,8 +37,8 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await authApi.login(u, p)
       persistToken(res.access_token, res.username, res.role)
       return res
-    } catch (e: any) {
-      error.value = e.message || '登录失败'
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : '登录失败'
       throw e
     } finally {
       loading.value = false

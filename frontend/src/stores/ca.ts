@@ -2,13 +2,27 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { caApi } from '@/api'
 
+interface RootCertItem {
+  id: string
+  serial_number: string
+  subject_dn: string
+  signature_algorithm: string
+  not_before: string
+  not_after: string
+  status: string
+}
+interface CAStatusResponse {
+  initialized: boolean
+  ca_name?: string
+}
+
 export const useCAStore = defineStore('ca', () => {
   const initialized = ref(false)
   const caName = ref('')
-  const rootCerts = ref<any[]>([])
+  const rootCerts = ref<RootCertItem[]>([])
 
   async function fetchStatus() {
-    const res = await caApi.status()
+    const res = (await caApi.status()) as CAStatusResponse
     initialized.value = res.initialized
     caName.value = res.ca_name || ''
     return res
@@ -21,8 +35,8 @@ export const useCAStore = defineStore('ca', () => {
   }
 
   async function fetchRootCerts() {
-    const res = await caApi.listRootCerts()
-    rootCerts.value = res as any[]
+    const res = (await caApi.listRootCerts()) as RootCertItem[]
+    rootCerts.value = res
     return rootCerts.value
   }
 
