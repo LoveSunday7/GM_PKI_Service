@@ -48,6 +48,12 @@ const router = createRouter({
       component: () => import('@/views/OCSPQuery.vue'),
       meta: { requiresAuth: true, title: 'OCSP 查询' },
     },
+    {
+      path: '/settings',
+      name: 'Settings',
+      component: () => import('@/views/Settings.vue'),
+      meta: { requiresAuth: true, title: '系统设置' },
+    },
   ],
 })
 

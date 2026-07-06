@@ -244,6 +244,54 @@ export const certApi = {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 系统配置
+// ═══════════════════════════════════════════════════════════════
+
+export interface SystemConfig {
+  app_name: string
+  debug: boolean
+  database_type: string
+  keystore_dir: string
+  log_level: string
+  ca_default_validity_days: number
+  cert_default_validity_days: number
+  crl_validity_hours: number
+  default_signature_algorithm: string
+}
+
+export interface KeystoreInfo {
+  path: string
+  file_count: number
+  files: Array<{ name: string; size_bytes: number; size_display: string }>
+  total_size_bytes: number
+  total_size_display: string
+}
+
+export const systemApi = {
+  getConfig: () =>
+    request<SystemConfig>('/system/config'),
+
+  getKeystoreInfo: () =>
+    request<KeystoreInfo>('/system/keystore-info'),
+
+  updateLogLevel: (level: string) =>
+    request<{ success: boolean; previous_level: string; current_level: string; message: string }>(
+      '/system/log-level',
+      { method: 'PUT', body: JSON.stringify({ level }) },
+    ),
+
+  updateConfig: (data: Partial<Pick<SystemConfig, 'ca_default_validity_days' | 'cert_default_validity_days' | 'crl_validity_hours'>>) =>
+    request<{
+      success: boolean
+      message: string
+      updated_fields: string[]
+      ca_default_validity_days: number
+      cert_default_validity_days: number
+      crl_validity_hours: number
+    }>('/system/config', { method: 'PUT', body: JSON.stringify(data) }),
+}
+
+// ═══════════════════════════════════════════════════════════════
 // CRL 撤销列表
 // ═══════════════════════════════════════════════════════════════
 
