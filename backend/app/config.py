@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 480  # 8 小时
 
+    # ── 日志 ──────────────────────────────────────────────────────
+    log_level: str = "INFO"  # DEBUG / INFO / WARNING / ERROR
+    log_dir: str = str(Path(__file__).resolve().parent.parent / "logs")
+    log_file: str = "app.log"
+
     # ── CORS ─────────────────────────────────────────────────────
     cors_origins: list[str] = ["http://localhost:5173"]
 

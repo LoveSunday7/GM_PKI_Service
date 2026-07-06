@@ -15,7 +15,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
+from app.logging_config import setup_logging
 from app.routers import auth, ca, crl, user_cert
+
+# ── 初始化日志系统 ─────────────────────────────────────────────────
+setup_logging()
+
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -43,6 +52,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── 请求日志中间件 ───────────────────────────────────────────────
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    elapsed = time.monotonic() - start
+    logger.info(
+        "%s %s → %d (%.3fs)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed,
+    )
+    return response
 
 # ── 路由注册 ─────────────────────────────────────────────────────
 app.include_router(auth.router)
