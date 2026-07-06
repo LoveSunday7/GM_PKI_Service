@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     crl_validity_hours: int = 24
     default_signature_algorithm: str = "SM3WITHSM2"
 
+    # ── JWT ──────────────────────────────────────────────────────
+    jwt_secret_key: str = "change-me-to-a-random-secret-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 480  # 8 小时
+
     # ── CORS ─────────────────────────────────────────────────────
     cors_origins: list[str] = ["http://localhost:5173"]
 

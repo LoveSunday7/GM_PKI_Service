@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import ca, crl, user_cert
+from app.routers import auth, ca, crl, user_cert
 
 
 @asynccontextmanager
@@ -45,6 +45,7 @@ app.add_middleware(
 )
 
 # ── 路由注册 ─────────────────────────────────────────────────────
+app.include_router(auth.router)
 app.include_router(ca.router)
 app.include_router(user_cert.router)
 app.include_router(crl.router)

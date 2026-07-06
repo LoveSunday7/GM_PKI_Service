@@ -1,5 +1,6 @@
 """按业务域分组的 Pydantic 数据模型."""
 
+from app.schemas.auth import LoginRequest, LoginResponse
 from app.schemas.ca import (
     CAInitRequest,
     CAInitResponse,
@@ -24,6 +25,9 @@ from app.schemas.crl import (
 from app.schemas.common import ErrorResponse, SuccessResponse
 
 __all__ = [
+    # 认证
+    "LoginRequest",
+    "LoginResponse",
     # 通用
     "SuccessResponse",
     "ErrorResponse",
