@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+# 支持的日志级别
+VALID_LOG_LEVELS = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
 class SystemConfigResponse(BaseModel):
@@ -17,3 +22,18 @@ class SystemConfigResponse(BaseModel):
     cert_default_validity_days: int = Field(description="用户证书默认有效期（天）")
     crl_validity_hours: int = Field(description="CRL 有效期（小时）")
     default_signature_algorithm: str = Field(description="默认签名算法")
+
+
+class LogLevelRequest(BaseModel):
+    """修改日志级别请求体."""
+
+    level: VALID_LOG_LEVELS = Field(description="目标日志级别（DEBUG / INFO / WARNING / ERROR）")
+
+
+class LogLevelResponse(BaseModel):
+    """修改日志级别响应."""
+
+    success: bool = Field(description="是否成功")
+    previous_level: str = Field(description="修改前的日志级别")
+    current_level: str = Field(description="修改后的日志级别")
+    message: str = Field(description="结果描述")
