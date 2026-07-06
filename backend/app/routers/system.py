@@ -6,12 +6,17 @@ import logging
 import os
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import inspect, text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.config import settings
+from app.database import engine
 from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.system import (
     ConfigUpdateRequest,
     ConfigUpdateResponse,
+    DatabaseInfoResponse,
+    DatabaseTableInfo,
     KeystoreFileItem,
     KeystoreInfoResponse,
     LogLevelRequest,
@@ -176,4 +181,50 @@ async def update_system_config(
         ca_default_validity_days=settings.ca_default_validity_days,
         cert_default_validity_days=settings.cert_default_validity_days,
         crl_validity_hours=settings.crl_validity_hours,
+    )
+
+
+# 需从表清单中排除的内部表
+_EXCLUDED_TABLES = {"alembic_version", "sqlite_sequence"}
+
+
+async def _get_table_names(conn: AsyncConnection) -> list[str]:
+    """获取数据库中的用户表名列表（排除内部表）."""
+    def _sync_tables(sync_conn):
+        inspector = inspect(sync_conn)
+        return inspector.get_table_names()
+
+    all_tables = await conn.run_sync(_sync_tables)
+    return [t for t in all_tables if t not in _EXCLUDED_TABLES]
+
+
+@router.get("/database", response_model=DatabaseInfoResponse)
+async def get_database_info(
+    _user: CurrentUser = Depends(get_current_user),
+) -> DatabaseInfoResponse:
+    """返回数据库详细信息：类型、连接状态、表列表及行数（需登录）."""
+    db_type = _detect_database_type(settings.database_url)
+    connected = False
+    tables: list[DatabaseTableInfo] = []
+    total_rows = 0
+
+    try:
+        async with engine.connect() as conn:
+            connected = True
+            table_names = await _get_table_names(conn)
+
+            for tname in sorted(table_names):
+                result = await conn.execute(text(f'SELECT COUNT(*) FROM "{tname}"'))
+                row_count: int = result.scalar()  # type: ignore[assignment]
+                tables.append(DatabaseTableInfo(name=tname, row_count=row_count))
+                total_rows += row_count
+    except Exception:
+        logger.exception("查询数据库信息失败")
+        connected = False
+
+    return DatabaseInfoResponse(
+        database_type=db_type,
+        connected=connected,
+        tables=tables,
+        total_rows=total_rows,
     )

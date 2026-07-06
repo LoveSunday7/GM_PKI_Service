@@ -27,6 +27,8 @@ from app.schemas.common import ErrorResponse, SuccessResponse
 from app.schemas.system import (
     ConfigUpdateRequest,
     ConfigUpdateResponse,
+    DatabaseInfoResponse,
+    DatabaseTableInfo,
     KeystoreFileItem,
     KeystoreInfoResponse,
     LogLevelRequest,
@@ -57,6 +59,8 @@ __all__ = [
     "KeystoreInfoResponse",
     "ConfigUpdateRequest",
     "ConfigUpdateResponse",
+    "DatabaseInfoResponse",
+    "DatabaseTableInfo",
     # CA
     "CAInitRequest",
     "CAInitResponse",

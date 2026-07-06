@@ -89,3 +89,19 @@ class ConfigUpdateResponse(BaseModel):
     ca_default_validity_days: int = Field(description="当前 CA 根证书默认有效期（天）")
     cert_default_validity_days: int = Field(description="当前用户证书默认有效期（天）")
     crl_validity_hours: int = Field(description="当前 CRL 有效期（小时）")
+
+
+class DatabaseTableInfo(BaseModel):
+    """数据库单表信息."""
+
+    name: str = Field(description="表名")
+    row_count: int = Field(description="行数")
+
+
+class DatabaseInfoResponse(BaseModel):
+    """数据库详细信息响应 — GET /api/system/database."""
+
+    database_type: str = Field(description="数据库类型（sqlite / mysql）")
+    connected: bool = Field(description="数据库连接状态")
+    tables: list[DatabaseTableInfo] = Field(description="表列表及行数")
+    total_rows: int = Field(description="所有表总行数")
