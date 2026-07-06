@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, Depends
 
 from app.config import settings
 from app.routers.auth import CurrentUser, get_current_user
-from app.schemas.system import LogLevelRequest, LogLevelResponse, SystemConfigResponse
+from app.schemas.system import (
+    KeystoreFileItem,
+    KeystoreInfoResponse,
+    LogLevelRequest,
+    LogLevelResponse,
+    SystemConfigResponse,
+)
 
 router = APIRouter(prefix="/api/system", tags=["系统"])
 logger = logging.getLogger(__name__)
@@ -22,6 +29,18 @@ def _detect_database_type(database_url: str) -> str:
     if "postgresql" in url_lower:
         return "postgresql"
     return "sqlite"
+
+
+def _format_size(size_bytes: int) -> str:
+    """将字节数转为人类可读的格式."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 
 @router.get("/config", response_model=SystemConfigResponse)
@@ -79,4 +98,34 @@ async def update_log_level(
         previous_level=previous_level,
         current_level=new_level,
         message=f"日志级别已从 {previous_level} 切换为 {new_level}",
+    )
+
+
+@router.get("/keystore-info", response_model=KeystoreInfoResponse)
+async def get_keystore_info(
+    _user: CurrentUser = Depends(get_current_user),
+) -> KeystoreInfoResponse:
+    """返回密钥库目录路径、文件列表及磁盘占用（需登录）."""
+    keystore_path = settings.keystore_dir
+
+    files: list[KeystoreFileItem] = []
+    total_size = 0
+
+    if os.path.isdir(keystore_path):
+        for entry in sorted(os.scandir(keystore_path), key=lambda e: e.name):
+            if entry.is_file():
+                size = entry.stat().st_size
+                total_size += size
+                files.append(KeystoreFileItem(
+                    name=entry.name,
+                    size_bytes=size,
+                    size_display=_format_size(size),
+                ))
+
+    return KeystoreInfoResponse(
+        path=keystore_path,
+        file_count=len(files),
+        files=files,
+        total_size_bytes=total_size,
+        total_size_display=_format_size(total_size),
     )

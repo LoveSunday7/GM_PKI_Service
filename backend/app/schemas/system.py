@@ -37,3 +37,21 @@ class LogLevelResponse(BaseModel):
     previous_level: str = Field(description="修改前的日志级别")
     current_level: str = Field(description="修改后的日志级别")
     message: str = Field(description="结果描述")
+
+
+class KeystoreFileItem(BaseModel):
+    """密钥库单个文件信息."""
+
+    name: str = Field(description="文件名")
+    size_bytes: int = Field(description="文件大小（字节）")
+    size_display: str = Field(description="文件大小（人类可读）")
+
+
+class KeystoreInfoResponse(BaseModel):
+    """密钥库信息响应 — GET /api/system/keystore-info."""
+
+    path: str = Field(description="密钥库目录绝对路径")
+    file_count: int = Field(description="文件数量")
+    files: list[KeystoreFileItem] = Field(description="文件列表")
+    total_size_bytes: int = Field(description="密钥库总占用（字节）")
+    total_size_display: str = Field(description="密钥库总占用（人类可读）")
