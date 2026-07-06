@@ -1,12 +1,14 @@
-"""认证接口 — 登录、登出、Token 管理."""
+"""认证接口 — 登录、登出、Token 管理，以及 JWT 认证依赖."""
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,49 @@ from app.models.token_blacklist import TokenBlacklist
 from app.schemas.auth import LoginRequest, LoginResponse, LogoutResponse
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
+
+# ── Bearer Token 安全方案 ──────────────────────────────────────
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@dataclass
+class CurrentUser:
+    """当前认证用户信息."""
+    username: str
+    role: str
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    """JWT 认证中间件 — 校验 Token 有效性、黑名单状态，返回当前用户.
+
+    作为 FastAPI 依赖注入到需要认证的路由中.
+    """
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="请先登录，缺少认证 Token")
+
+    token = credentials.credentials
+
+    # 1. 解码并校验 JWT 签名与过期时间
+    try:
+        payload = decode_token(token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token 无效或已过期，请重新登录")
+
+    jti = payload.get("jti")
+    username = payload.get("sub", "unknown")
+    role = payload.get("role", "admin")
+
+    # 2. 检查 Token 是否已在黑名单中（已登出）
+    if jti:
+        stmt = select(TokenBlacklist).where(TokenBlacklist.token_jti == jti)
+        result = await db.execute(stmt)
+        if result.scalars().first() is not None:
+            raise HTTPException(status_code=401, detail="Token 已登出，请重新登录")
+
+    return CurrentUser(username=username, role=role)
 
 
 def create_access_token(data: dict) -> tuple[str, str]:

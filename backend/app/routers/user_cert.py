@@ -13,6 +13,7 @@ from app.models.ca_config import CAConfig
 from app.models.crl import CRLRevocation
 from app.models.root_cert import RootCert
 from app.models.user_cert import UserCert
+from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.cert import (
     CertDetailResponse,
     CertDownloadResponse,
@@ -42,7 +43,7 @@ async def _get_active_root_cert(db: AsyncSession) -> RootCert:
 
 
 @router.post("/issue", response_model=CertIssueResponse)
-async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_db)) -> CertIssueResponse:
+async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CertIssueResponse:
     """签发新的用户证书（签名证书或加密证书）。"""
     root_cert = await _get_active_root_cert(db)
 
@@ -117,6 +118,7 @@ async def list_certs(
     cert_type: str | None = None,
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> list[CertListItem]:
     """查询用户证书列表，可按类型和状态筛选."""
     stmt = select(UserCert)
@@ -132,7 +134,7 @@ async def list_certs(
 
 @router.get("/{serial_number}", response_model=CertDetailResponse)
 async def get_cert_detail(
-    serial_number: str, db: AsyncSession = Depends(get_db)
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
 ) -> CertDetailResponse:
     """查询用户证书详细信息."""
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
@@ -145,7 +147,7 @@ async def get_cert_detail(
 
 @router.get("/{serial_number}/download", response_model=CertDownloadResponse)
 async def download_cert(
-    serial_number: str, db: AsyncSession = Depends(get_db)
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
 ) -> CertDownloadResponse:
     """下载用户证书（PEM）及 CA 证书链."""
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
@@ -169,7 +171,7 @@ async def download_cert(
 
 @router.get("/{serial_number}/status", response_model=CertStatusResponse)
 async def check_cert_status(
-    serial_number: str, db: AsyncSession = Depends(get_db)
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
 ) -> CertStatusResponse:
     """查询证书的撤销状态."""
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)

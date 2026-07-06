@@ -19,6 +19,7 @@ from app.schemas.ca import (
     RootCertDetailResponse,
     RootCertListItem,
 )
+from app.routers.auth import CurrentUser, get_current_user
 from app.services.crypto import (
     build_dn,
     build_self_signed_root_cert,
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/api/ca", tags=["CA"])
 
 
 @router.post("/initialize", response_model=CAInitResponse)
-async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_db)) -> CAInitResponse:
+async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CAInitResponse:
     """初始化 CA 并签发自签名根证书。
 
     系统仅允许存在一个 CA；重复调用将返回 409 错误。
@@ -108,7 +109,7 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
 
 
 @router.get("/root-cert", response_model=list[RootCertListItem])
-async def list_root_certs(db: AsyncSession = Depends(get_db)) -> list[RootCertListItem]:
+async def list_root_certs(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> list[RootCertListItem]:
     """查询所有根证书."""
     stmt = select(RootCert).order_by(RootCert.created_at.desc())
     result = await db.execute(stmt)
@@ -118,7 +119,7 @@ async def list_root_certs(db: AsyncSession = Depends(get_db)) -> list[RootCertLi
 
 @router.get("/root-cert/{serial_number}", response_model=RootCertDetailResponse)
 async def get_root_cert_detail(
-    serial_number: str, db: AsyncSession = Depends(get_db)
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
 ) -> RootCertDetailResponse:
     """根据序列号查询根证书详情."""
     stmt = select(RootCert).where(RootCert.serial_number == serial_number)
@@ -130,7 +131,7 @@ async def get_root_cert_detail(
 
 
 @router.get("/root-cert/{serial_number}/download")
-async def download_root_cert(serial_number: str, db: AsyncSession = Depends(get_db)):
+async def download_root_cert(serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
     """下载根证书 PEM 文件."""
     from fastapi.responses import PlainTextResponse
 
@@ -147,7 +148,7 @@ async def download_root_cert(serial_number: str, db: AsyncSession = Depends(get_
 
 
 @router.get("/status")
-async def ca_status(db: AsyncSession = Depends(get_db)):
+async def ca_status(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
     """查询 CA 初始化状态."""
     stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
     result = await db.execute(stmt)

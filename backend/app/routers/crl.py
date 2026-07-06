@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.crl import CRLPublish, CRLRevocation
 from app.models.root_cert import RootCert
 from app.models.user_cert import UserCert
+from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.crl import (
     CRLDownloadResponse,
     CRLGenerateResponse,
@@ -36,7 +37,7 @@ async def _get_active_root_cert(db: AsyncSession) -> RootCert:
 
 @router.post("/revoke", response_model=CRLRevokeResponse)
 async def revoke_certificate(
-    payload: CRLRevokeRequest, db: AsyncSession = Depends(get_db)
+    payload: CRLRevokeRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
 ) -> CRLRevokeResponse:
     """登记证书撤销申请。
 
@@ -73,7 +74,7 @@ async def revoke_certificate(
 
 
 @router.post("/generate", response_model=CRLGenerateResponse)
-async def generate_crl(db: AsyncSession = Depends(get_db)) -> CRLGenerateResponse:
+async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CRLGenerateResponse:
     """生成新的 CRL，由根 CA 私钥签名。
 
     收集所有待处理的撤销记录并签发 CRL。
@@ -160,7 +161,7 @@ async def generate_crl(db: AsyncSession = Depends(get_db)) -> CRLGenerateRespons
 
 
 @router.get("/current", response_model=CRLQueryResponse | dict)
-async def get_current_crl(db: AsyncSession = Depends(get_db)):
+async def get_current_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
     """查询当前最新的 CRL 及撤销明细."""
     stmt = select(CRLPublish).order_by(CRLPublish.crl_number.desc()).limit(1)
     result = await db.execute(stmt)
@@ -196,7 +197,7 @@ async def get_current_crl(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/download", response_model=CRLDownloadResponse)
-async def download_crl(db: AsyncSession = Depends(get_db)):
+async def download_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
     """下载最新 CRL 文件."""
     stmt = select(CRLPublish).order_by(CRLPublish.crl_number.desc()).limit(1)
     result = await db.execute(stmt)
