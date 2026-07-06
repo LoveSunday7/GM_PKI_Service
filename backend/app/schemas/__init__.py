@@ -25,6 +25,8 @@ from app.schemas.crl import (
 )
 from app.schemas.common import ErrorResponse, SuccessResponse
 from app.schemas.system import (
+    ConfigUpdateRequest,
+    ConfigUpdateResponse,
     KeystoreFileItem,
     KeystoreInfoResponse,
     LogLevelRequest,
@@ -53,6 +55,8 @@ __all__ = [
     "LogLevelResponse",
     "KeystoreFileItem",
     "KeystoreInfoResponse",
+    "ConfigUpdateRequest",
+    "ConfigUpdateResponse",
     # CA
     "CAInitRequest",
     "CAInitResponse",

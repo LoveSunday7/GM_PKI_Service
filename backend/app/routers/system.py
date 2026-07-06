@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends
 from app.config import settings
 from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.system import (
+    ConfigUpdateRequest,
+    ConfigUpdateResponse,
     KeystoreFileItem,
     KeystoreInfoResponse,
     LogLevelRequest,
@@ -128,4 +130,50 @@ async def get_keystore_info(
         files=files,
         total_size_bytes=total_size,
         total_size_display=_format_size(total_size),
+    )
+
+
+@router.put("/config", response_model=ConfigUpdateResponse)
+async def update_system_config(
+    payload: ConfigUpdateRequest,
+    _user: CurrentUser = Depends(get_current_user),
+) -> ConfigUpdateResponse:
+    """更新可动态修改的系统配置项（需登录）。
+
+    仅更新请求中提供了的字段，未提供的字段保持不变。
+    可修改项：CA 默认有效期、证书默认有效期、CRL 有效期。
+    """
+    updated_fields: list[str] = []
+
+    if payload.ca_default_validity_days is not None:
+        old_val = settings.ca_default_validity_days
+        settings.ca_default_validity_days = payload.ca_default_validity_days
+        logger.info("CA 默认有效期: %s → %s 天", old_val, payload.ca_default_validity_days)
+        updated_fields.append("ca_default_validity_days")
+
+    if payload.cert_default_validity_days is not None:
+        old_val = settings.cert_default_validity_days
+        settings.cert_default_validity_days = payload.cert_default_validity_days
+        logger.info("证书默认有效期: %s → %s 天", old_val, payload.cert_default_validity_days)
+        updated_fields.append("cert_default_validity_days")
+
+    if payload.crl_validity_hours is not None:
+        old_val = settings.crl_validity_hours
+        settings.crl_validity_hours = payload.crl_validity_hours
+        logger.info("CRL 有效期: %s → %s 小时", old_val, payload.crl_validity_hours)
+        updated_fields.append("crl_validity_hours")
+
+    message = (
+        f"已更新 {len(updated_fields)} 项配置：" + ", ".join(updated_fields)
+        if updated_fields
+        else "未提供需要更新的配置项，无变更"
+    )
+
+    return ConfigUpdateResponse(
+        success=True,
+        message=message,
+        updated_fields=updated_fields,
+        ca_default_validity_days=settings.ca_default_validity_days,
+        cert_default_validity_days=settings.cert_default_validity_days,
+        crl_validity_hours=settings.crl_validity_hours,
     )
