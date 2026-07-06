@@ -2,13 +2,62 @@
 import { computed, onMounted, ref } from 'vue'
 import { useCertStore } from '@/stores/cert'
 import { useCAStore } from '@/stores/ca'
-import { certApi } from '@/api'
+import { certApi, crlApi } from '@/api'
 
 const certStore = useCertStore()
 const caStore = useCAStore()
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+
+// ── 批量撤销 ───────────────────────────────────────────────────
+const selectedSerials = ref<Set<string>>(new Set())
+const batchRevoking = ref(false)
+
+const activeFilteredCerts = computed(() =>
+  filteredCerts.value.filter((c: { status: string }) => c.status === 'active')
+)
+
+function toggleSelect(serial: string) {
+  const s = new Set(selectedSerials.value)
+  if (s.has(serial)) s.delete(serial)
+  else s.add(serial)
+  selectedSerials.value = s
+}
+
+function toggleSelectAll() {
+  if (selectedSerials.value.size === activeFilteredCerts.value.length) {
+    selectedSerials.value = new Set()
+  } else {
+    selectedSerials.value = new Set(activeFilteredCerts.value.map((c: { serial_number: string }) => c.serial_number))
+  }
+}
+
+async function handleBatchRevoke() {
+  if (selectedSerials.value.size === 0) return
+  batchRevoking.value = true
+  error.value = ''
+  success.value = ''
+  let done = 0
+  let failed = 0
+  for (const serial of selectedSerials.value) {
+    try {
+      await crlApi.revoke({ cert_serial_number: serial, reason: 'unspecified' })
+      done++
+    } catch {
+      failed++
+    }
+  }
+  selectedSerials.value = new Set()
+  await certStore.fetchList()
+  batchRevoking.value = false
+  if (failed) {
+    error.value = `撤销完成：${done} 张成功，${failed} 张失败`
+  } else {
+    success.value = `已成功撤销 ${done} 张证书`
+    setTimeout(() => { success.value = '' }, 5000)
+  }
+}
 
 // ── 筛选 ───────────────────────────────────────────────────────
 const filterType = ref('')
@@ -174,9 +223,21 @@ async function copyText(text: string, field: string) {
         <span class="filter-count">{{ filteredCerts.length }} / {{ certStore.certs.length }} 张</span>
       </div>
 
+      <!-- 批量操作栏 -->
+      <div class="batch-bar" v-if="selectedSerials.size > 0">
+        <span>已选 <strong>{{ selectedSerials.size }}</strong> 张证书</span>
+        <button class="btn btn-sm btn-danger" :disabled="batchRevoking" @click="handleBatchRevoke">
+          {{ batchRevoking ? '⏳ 撤销中...' : `🚫 撤销所选 (${selectedSerials.size})` }}
+        </button>
+        <button class="btn btn-sm btn-ghost" @click="selectedSerials = new Set()">取消选择</button>
+      </div>
+
       <table v-if="certStore.certs.length">
         <thead>
           <tr>
+            <th class="col-cb">
+              <input type="checkbox" :checked="selectedSerials.size === activeFilteredCerts.length && activeFilteredCerts.length > 0" @click.stop="toggleSelectAll" />
+            </th>
             <th>序列号</th>
             <th>类型</th>
             <th>主题 DN</th>
@@ -190,20 +251,27 @@ async function copyText(text: string, field: string) {
           <tr
             v-for="c in filteredCerts"
             :key="c.id"
-            @click="showDetail(c.serial_number)"
-            class="clickable-row"
             :class="{ 'row-selected': selectedCert?.serial_number === c.serial_number }"
           >
-            <td><code>{{ c.serial_number?.slice(0, 14) }}...</code></td>
-            <td>
+            <td class="col-cb">
+              <input
+                v-if="c.status === 'active'"
+                type="checkbox"
+                :checked="selectedSerials.has(c.serial_number)"
+                @click.stop
+                @change="toggleSelect(c.serial_number)"
+              />
+            </td>
+            <td @click="showDetail(c.serial_number)" class="clickable-cell"><code>{{ c.serial_number?.slice(0, 14) }}...</code></td>
+            <td @click="showDetail(c.serial_number)" class="clickable-cell">
               <span class="badge" :class="c.cert_type === 'sign' ? 'badge-blue' : 'badge-purple'">
                 {{ c.cert_type }}
               </span>
             </td>
-            <td>{{ c.subject_dn }}</td>
-            <td>{{ c.user_name }}</td>
-            <td>{{ new Date(c.not_after).toLocaleDateString() }}</td>
-            <td>
+            <td @click="showDetail(c.serial_number)" class="clickable-cell">{{ c.subject_dn }}</td>
+            <td @click="showDetail(c.serial_number)" class="clickable-cell">{{ c.user_name }}</td>
+            <td @click="showDetail(c.serial_number)" class="clickable-cell">{{ new Date(c.not_after).toLocaleDateString() }}</td>
+            <td @click="showDetail(c.serial_number)" class="clickable-cell">
               <span :class="['badge', c.status === 'active' ? 'badge-green' : 'badge-red']">{{ c.status }}</span>
             </td>
             <td>
@@ -308,6 +376,32 @@ textarea { resize: vertical; font-family: monospace; }
   color: #999;
   margin-left: auto;
 }
+
+/* 批量操作栏 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.batch-bar .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; border-radius: 6px; cursor: pointer; border: none; }
+.batch-bar .btn-danger { background: #dc3545; color: #fff; }
+.batch-bar .btn-danger:hover:not(:disabled) { background: #c82333; }
+.batch-bar .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+.batch-bar .btn-ghost { background: transparent; color: #666; border: 1px solid #ccc; }
+
+/* 复选框列 */
+.col-cb { width: 36px; text-align: center; }
+.col-cb input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; }
+
+/* 可点击的表格单元格 */
+.clickable-cell { cursor: pointer; transition: background 0.15s; }
+.clickable-cell:hover { background: #f8f9fa; }
 button { padding: 0.6rem 1.5rem; background: #1a1a2e; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #555; }
@@ -318,8 +412,6 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #eee; font-size: 0.85rem; }
 th { color: #666; font-weight: 600; }
-.clickable-row { cursor: pointer; transition: background 0.15s; }
-.clickable-row:hover { background: #f8f9fa; }
 .row-selected { background: #e8f0fe; }
 code { font-size: 0.8rem; background: #f0f0f0; padding: 0.15rem 0.35rem; border-radius: 4px; }
 .badge { padding: 0.15rem 0.6rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
