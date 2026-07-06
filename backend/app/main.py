@@ -19,7 +19,7 @@ from app.config import settings
 from app.database import check_db, engine
 from app.exceptions import register_exception_handlers
 from app.logging_config import setup_logging
-from app.routers import auth, ca, crl, user_cert
+from app.routers import auth, ca, crl, ocsp, user_cert
 
 # ── 初始化日志系统 ─────────────────────────────────────────────────
 setup_logging()
@@ -83,6 +83,7 @@ _tags_metadata = [
     {"name": "CA", "description": "根证书签发、查询、下载"},
     {"name": "用户证书", "description": "用户证书签发、查询、撤销状态"},
     {"name": "CRL", "description": "证书撤销、CRL 生成、查询、下载"},
+    {"name": "OCSP", "description": "在线证书状态实时查询"},
 ]
 
 app = FastAPI(
@@ -128,6 +129,7 @@ app.include_router(auth.router)
 app.include_router(ca.router)
 app.include_router(user_cert.router)
 app.include_router(crl.router)
+app.include_router(ocsp.router)
 
 
 @app.get("/api/health")

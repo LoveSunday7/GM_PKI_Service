@@ -24,6 +24,7 @@ from app.schemas.crl import (
     CRLRevokeResponse,
 )
 from app.schemas.common import ErrorResponse, SuccessResponse
+from app.schemas.ocsp import OCSPQueryRequest, OCSPQueryResponse
 from app.schemas.verify import (
     CertVerifyRequest,
     CertVerifyResponse,
@@ -58,4 +59,12 @@ __all__ = [
     "CRLGenerateResponse",
     "CRLQueryResponse",
     "CRLDownloadResponse",
+    # OCSP
+    "OCSPQueryRequest",
+    "OCSPQueryResponse",
+    # 验证
+    "CertVerifyRequest",
+    "CertVerifyResponse",
+    "CRLVerifyRequest",
+    "CRLVerifyResponse",
 ]
