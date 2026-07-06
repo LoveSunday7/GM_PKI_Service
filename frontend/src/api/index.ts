@@ -241,6 +241,12 @@ export const certApi = {
 
   download: (serial: string) =>
     download(`/cert/${serial}/download`, `${serial}.pem`),
+
+  stats: () =>
+    request<{ total: number; active: number; revoked: number; sign: number; encrypt: number; expiring_soon: number; today_issued: number }>('/cert/stats'),
+
+  activity: () =>
+    request<{ activities: Array<{ type: string; time: string; user: string; serial: string; detail: string }> }>('/cert/activity'),
 }
 
 // ═══════════════════════════════════════════════════════════════

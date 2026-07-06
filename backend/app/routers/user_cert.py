@@ -142,10 +142,66 @@ async def cert_stats(db: AsyncSession = Depends(get_db), _user: CurrentUser = De
     )
     expiring = (await db.execute(expiring_stmt)).scalar() or 0
 
+    today_start = dt.now(tz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_issued_stmt = select(sqlfunc.count(UserCert.id)).where(UserCert.created_at >= today_start)
+    today_issued = (await db.execute(today_issued_stmt)).scalar() or 0
+
     return {
         "total": total, "active": active, "revoked": revoked,
         "sign": sign, "encrypt": encrypt, "expiring_soon": expiring,
+        "today_issued": today_issued,
     }
+
+
+@router.get("/activity")
+async def recent_activity(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    """返回最近 10 条操作时间线（证书签发、撤销、CRL 发布）."""
+    activities: list[dict] = []
+
+    # 最近签发的证书
+    issued = (await db.execute(
+        select(UserCert).order_by(UserCert.created_at.desc()).limit(10)
+    )).scalars().all()
+    for c in issued:
+        activities.append({
+            "type": "issue",
+            "time": c.created_at.isoformat(),
+            "user": c.user_name,
+            "serial": c.serial_number[:16],
+            "detail": f"签发 {c.cert_type} 证书给 {c.user_name}",
+        })
+
+    # 最近撤销
+    revocations = (await db.execute(
+        select(CRLRevocation).order_by(CRLRevocation.revoked_at.desc()).limit(10)
+    )).scalars().all()
+    for r in revocations:
+        activities.append({
+            "type": "revoke",
+            "time": r.revoked_at.isoformat() if r.revoked_at else r.created_at.isoformat(),
+            "user": r.cert_serial_number[:16],
+            "serial": r.cert_serial_number[:16],
+            "detail": f"撤销证书 {r.cert_serial_number[:16]}... ({r.reason})",
+        })
+
+    # 最近 CRL 发布
+    from app.models.crl import CRLPublish
+    publishes = (await db.execute(
+        select(CRLPublish).order_by(CRLPublish.created_at.desc()).limit(10)
+    )).scalars().all()
+    for p in publishes:
+        activities.append({
+            "type": "crl",
+            "time": p.created_at.isoformat(),
+            "user": f"CRL #{p.crl_number}",
+            "serial": f"CRL#{p.crl_number}",
+            "detail": f"生成 CRL #{p.crl_number}（撤销 {p.revoked_count} 张证书）",
+        })
+
+    # 按时间降序，取前 10
+    activities.sort(key=lambda a: a["time"], reverse=True)
+
+    return {"activities": activities[:10]}
 
 
 @router.get("/list", response_model=list[CertListItem])
