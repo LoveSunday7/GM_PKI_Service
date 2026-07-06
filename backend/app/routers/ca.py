@@ -15,6 +15,7 @@ from app.models.root_cert import RootCert
 from app.schemas.ca import (
     CAInitRequest,
     CAInitResponse,
+    CAStatusResponse,
     RootCertDetailResponse,
     RootCertListItem,
 )
@@ -143,17 +144,17 @@ async def download_root_cert(serial_number: str, db: AsyncSession = Depends(get_
     )
 
 
-@router.get("/status")
+@router.get("/status", response_model=CAStatusResponse)
 async def ca_status(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
     """查询 CA 初始化状态."""
     stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
     result = await db.execute(stmt)
     config = result.scalars().first()
     if config is None:
-        return {"initialized": False}
-    return {
-        "initialized": True,
-        "ca_name": config.ca_name,
-        "organization": config.organization,
-        "signature_algorithm": config.signature_algorithm,
-    }
+        return CAStatusResponse(initialized=False)
+    return CAStatusResponse(
+        initialized=True,
+        ca_name=config.ca_name,
+        organization=config.organization,
+        signature_algorithm=config.signature_algorithm,
+    )

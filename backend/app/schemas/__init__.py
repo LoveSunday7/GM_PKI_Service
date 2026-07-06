@@ -4,6 +4,7 @@ from app.schemas.auth import LoginRequest, LoginResponse, LogoutResponse
 from app.schemas.ca import (
     CAInitRequest,
     CAInitResponse,
+    CAStatusResponse,
     RootCertDetailResponse,
     RootCertListItem,
 )
@@ -35,6 +36,7 @@ __all__ = [
     # CA
     "CAInitRequest",
     "CAInitResponse",
+    "CAStatusResponse",
     "RootCertListItem",
     "RootCertDetailResponse",
     # 证书
