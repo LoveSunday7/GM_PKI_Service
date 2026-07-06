@@ -17,6 +17,7 @@ const navItems = [
   { to: '/cert', label: '用户证书', icon: '📜' },
   { to: '/crl', label: 'CRL', icon: '🚫' },
   { to: '/verify', label: '证书验证', icon: '🔍' },
+  { to: '/ocsp', label: 'OCSP', icon: '🟢' },
 ]
 </script>
 
