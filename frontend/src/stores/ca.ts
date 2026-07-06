@@ -35,7 +35,7 @@ export const useCAStore = defineStore('ca', () => {
   }
 
   async function fetchRootCerts() {
-    const res = (await caApi.listRootCerts()) as RootCertItem[]
+    const res = await caApi.listRootCerts()
     rootCerts.value = res
     return rootCerts.value
   }

@@ -19,7 +19,7 @@ export const useCertStore = defineStore('cert', () => {
   const current = ref<CertDetail | null>(null)
 
   async function fetchList(params?: { cert_type?: string; status?: string }) {
-    const res = (await certApi.list(params)) as CertItem[]
+    const res = await certApi.list(params)
     certs.value = res
     return certs.value
   }
