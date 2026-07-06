@@ -425,15 +425,19 @@ code {
   font-size: 0.85rem;
 }
 .pager button {
-  padding: 0.35rem 0.75rem;
-  border: 1px solid #ccc;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid #999;
   background: #fff;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: #333;
+  transition: all 0.15s;
 }
-.pager button:disabled { opacity: 0.4; cursor: not-allowed; }
-.pager button:hover:not(:disabled) { background: #f0f0f0; }
+.pager button:disabled { opacity: 0.25; cursor: not-allowed; }
+.pager button:hover:not(:disabled) { background: #0f3460; color: #fff; border-color: #0f3460; }
+.pager .page-btn.active { background: #0f3460; color: #fff; border-color: #0f3460; }
 
 /* 自动补全 */
 .autocomplete-wrapper { position: relative; }

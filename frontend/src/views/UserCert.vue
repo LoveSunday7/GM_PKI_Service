@@ -445,18 +445,21 @@ textarea { resize: vertical; font-family: monospace; }
   flex-wrap: wrap;
 }
 .pager button {
-  padding: 0.3rem 0.6rem;
-  border: 1px solid #ccc;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #999;
   background: #fff;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 0.8rem;
-  min-width: 32px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #333;
+  min-width: 34px;
+  transition: all 0.15s;
 }
-.pager button:disabled { opacity: 0.4; cursor: not-allowed; }
-.pager button:hover:not(:disabled) { background: #f0f0f0; }
-.pager .page-btn.active { background: #0f3460; color: #fff; border-color: #0f3460; }
-.pager .page-dots { padding: 0 0.2rem; color: #999; }
+.pager button:disabled { opacity: 0.25; cursor: not-allowed; }
+.pager button:hover:not(:disabled) { background: #0f3460; color: #fff; border-color: #0f3460; }
+.pager .page-btn.active { background: #0f3460; color: #fff; border-color: #0f3460; font-weight: 700; }
+.pager .page-dots { padding: 0 0.2rem; color: #666; font-weight: 500; }
 button { padding: 0.6rem 1.5rem; background: #1a1a2e; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #555; }
