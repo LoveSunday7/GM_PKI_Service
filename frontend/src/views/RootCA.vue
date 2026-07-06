@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useCAStore } from '@/stores/ca'
-import { caApi } from '@/api'
+import { caApi, systemApi } from '@/api'
 
 const caStore = useCAStore()
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+const keystorePath = ref('')
 
 const form = ref({
   ca_name: 'GM-PKI-CA',
@@ -23,9 +24,13 @@ const selectedCert = ref<Record<string, unknown> | null>(null)
 const detailLoading = ref(false)
 const pemCopied = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
   caStore.fetchStatus()
   caStore.fetchRootCerts()
+  try {
+    const cfg = await systemApi.getConfig()
+    keystorePath.value = cfg.keystore_dir
+  } catch { /* ignore */ }
 })
 
 async function handleInit() {
@@ -138,6 +143,9 @@ async function handleDownload(serial: string) {
           <button type="submit" :disabled="loading">
             {{ loading ? '初始化中...' : '初始化 CA' }}
           </button>
+        </div>
+        <div v-if="keystorePath" class="keystore-hint">
+          💾 密钥库路径：<code>{{ keystorePath }}/root_{序列号}.pem</code>（证书）与 <code>.key</code>（私钥）
         </div>
       </form>
       <p v-if="error" class="error">{{ error }}</p>
@@ -273,6 +281,21 @@ select {
 }
 .form-actions {
   grid-column: 1 / -1;
+}
+.keystore-hint {
+  grid-column: 1 / -1;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #f0f4f8;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #555;
+}
+.keystore-hint code {
+  font-size: 0.75rem;
+  background: #e0e4e8;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
 }
 button {
   padding: 0.6rem 1.5rem;
