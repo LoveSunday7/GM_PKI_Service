@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useCAStore } from '@/stores/ca'
+import { caApi } from '@/api'
 
 const caStore = useCAStore()
 const loading = ref(false)
 const error = ref('')
+const success = ref('')
 
 const form = ref({
   ca_name: 'GM-PKI-CA',
@@ -16,6 +18,10 @@ const form = ref({
   validity_days: 3650,
 })
 
+// 证书详情
+const selectedCert = ref<Record<string, unknown> | null>(null)
+const detailLoading = ref(false)
+
 onMounted(() => {
   caStore.fetchStatus()
   caStore.fetchRootCerts()
@@ -24,13 +30,38 @@ onMounted(() => {
 async function handleInit() {
   loading.value = true
   error.value = ''
+  success.value = ''
   try {
-    await caStore.initialize(form.value)
+    const res = await caStore.initialize(form.value)
     await caStore.fetchRootCerts()
+    success.value = `根 CA 签发成功！序列号: ${(res as { serial_number?: string }).serial_number?.slice(0, 20)}...`
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Initialization failed'
   } finally {
     loading.value = false
+  }
+}
+
+async function showDetail(serial: string) {
+  detailLoading.value = true
+  try {
+    selectedCert.value = await caApi.getRootCert(serial)
+  } catch {
+    selectedCert.value = null
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function closeDetail() {
+  selectedCert.value = null
+}
+
+async function handleDownload(serial: string) {
+  try {
+    await caApi.downloadRootCert(serial)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : '下载失败'
   }
 }
 </script>
@@ -45,6 +76,9 @@ async function handleInit() {
       <p v-if="caStore.initialized" class="ok">✅ CA 已初始化 — {{ caStore.caName }}</p>
       <p v-else class="warn">⚠️ CA 尚未初始化，请使用下方表单进行初始化。</p>
     </section>
+
+    <!-- 成功消息 -->
+    <p v-if="success" class="success-msg">{{ success }}</p>
 
     <!-- 初始化表单 -->
     <section class="section" v-if="!caStore.initialized">
@@ -102,20 +136,67 @@ async function handleInit() {
             <th>生效日期</th>
             <th>到期日期</th>
             <th>状态</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="c in caStore.rootCerts" :key="c.id">
+          <tr
+            v-for="c in caStore.rootCerts"
+            :key="c.id"
+            @click="showDetail(c.serial_number)"
+            class="clickable-row"
+            :class="{ 'row-selected': selectedCert?.serial_number === c.serial_number }"
+          >
             <td><code>{{ c.serial_number?.slice(0, 16) }}...</code></td>
             <td>{{ c.subject_dn }}</td>
             <td>{{ c.signature_algorithm }}</td>
             <td>{{ new Date(c.not_before).toLocaleDateString() }}</td>
             <td>{{ new Date(c.not_after).toLocaleDateString() }}</td>
             <td><span class="badge badge-green">{{ c.status }}</span></td>
+            <td>
+              <button class="btn-sm" @click.stop="handleDownload(c.serial_number)">⬇ 下载</button>
+            </td>
           </tr>
         </tbody>
       </table>
       <p v-else class="empty">暂无根证书。</p>
+    </section>
+
+    <!-- 证书详情面板 -->
+    <section class="section" v-if="selectedCert">
+      <div class="detail-header">
+        <h3>证书详情</h3>
+        <button class="btn-close" @click="closeDetail">✕</button>
+      </div>
+      <div v-if="detailLoading" class="loading">加载中...</div>
+      <dl v-else class="detail-grid">
+        <dt>序列号</dt>
+        <dd><code>{{ selectedCert.serial_number }}</code></dd>
+        <dt>主题 DN</dt>
+        <dd>{{ selectedCert.subject_dn }}</dd>
+        <dt>签发者 DN</dt>
+        <dd>{{ selectedCert.issuer_dn }}</dd>
+        <dt>签名算法</dt>
+        <dd>{{ selectedCert.signature_algorithm }}</dd>
+        <dt>密钥长度</dt>
+        <dd>{{ selectedCert.key_size }} bit</dd>
+        <dt>生效时间</dt>
+        <dd>{{ selectedCert.not_before }}</dd>
+        <dt>到期时间</dt>
+        <dd>{{ selectedCert.not_after }}</dd>
+        <dt>状态</dt>
+        <dd><span :class="['badge', selectedCert.status === 'active' ? 'badge-green' : 'badge-red']">{{ selectedCert.status }}</span></dd>
+        <dt>主题密钥标识符</dt>
+        <dd><code>{{ selectedCert.subject_key_identifier || '—' }}</code></dd>
+        <dt>授权密钥标识符</dt>
+        <dd><code>{{ selectedCert.authority_key_identifier || '—' }}</code></dd>
+        <dt>基本约束</dt>
+        <dd>{{ selectedCert.basic_constraints || '—' }}</dd>
+        <dt>密钥用途</dt>
+        <dd>{{ selectedCert.key_usage || '—' }}</dd>
+        <dt>证书 PEM</dt>
+        <dd><pre class="pem-preview">{{ (selectedCert.cert_pem as string)?.slice(0, 300) }}...</pre></dd>
+      </dl>
     </section>
   </div>
 </template>
@@ -135,12 +216,18 @@ async function handleInit() {
   margin-bottom: 1rem;
   font-size: 1.1rem;
 }
-.ok {
+.ok { color: #155724; }
+.warn { color: #856404; }
+.loading { color: #888; font-style: italic; }
+
+.success-msg {
+  background: #d4edda;
   color: #155724;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
 }
-.warn {
-  color: #856404;
-}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -176,24 +263,37 @@ button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.btn-sm {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  background: #555;
+}
 .error {
   color: #c00;
   margin-top: 0.75rem;
 }
+
+/* 表格 */
 table {
   width: 100%;
   border-collapse: collapse;
 }
-th,
-td {
+th, td {
   padding: 0.5rem 0.75rem;
   text-align: left;
   border-bottom: 1px solid #eee;
   font-size: 0.85rem;
 }
-th {
-  color: #666;
-  font-weight: 600;
+th { color: #666; font-weight: 600; }
+.clickable-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.clickable-row:hover {
+  background: #f8f9fa;
+}
+.row-selected {
+  background: #e8f0fe;
 }
 code {
   font-size: 0.8rem;
@@ -207,12 +307,49 @@ code {
   font-size: 0.8rem;
   font-weight: 600;
 }
-.badge-green {
-  background: #d4edda;
-  color: #155724;
+.badge-green { background: #d4edda; color: #155724; }
+.badge-red { background: #f8d7da; color: #721c24; }
+.empty { color: #888; font-style: italic; }
+
+/* 详情面板 */
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
 }
-.empty {
+.detail-header h3 { margin-bottom: 0; }
+.btn-close {
+  background: none;
   color: #888;
-  font-style: italic;
+  font-size: 1.1rem;
+  padding: 0.25rem 0.5rem;
+}
+.btn-close:hover { color: #333; }
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+.detail-grid dt {
+  color: #666;
+  font-weight: 600;
+}
+.detail-grid dd {
+  word-break: break-all;
+}
+
+.pem-preview {
+  background: #f8f8f8;
+  padding: 0.5rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
 }
 </style>
