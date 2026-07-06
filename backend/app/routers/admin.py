@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.admin_user import AdminUser
 from app.routers.auth import CurrentUser, get_current_user, hash_password
-from app.schemas.admin import AdminUserListItem, CreateAdminUserRequest, CreateAdminUserResponse
+from app.schemas.admin import AdminUserListItem, CreateAdminUserRequest, CreateAdminUserResponse, DeleteAdminUserResponse
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
 logger = logging.getLogger(__name__)
@@ -59,3 +59,33 @@ async def list_admin_users(
     result = await db.execute(stmt)
     users = result.scalars().all()
     return [AdminUserListItem.model_validate(u) for u in users]
+
+
+@router.delete("/users/{username}", response_model=DeleteAdminUserResponse)
+async def delete_admin_user(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> DeleteAdminUserResponse:
+    """删除管理员用户（需登录，禁止删除自己）."""
+    # 禁止删除自己
+    if username == current_user.username:
+        raise HTTPException(status_code=403, detail="禁止删除自己的账户")
+
+    # 查找用户
+    stmt = select(AdminUser).where(AdminUser.username == username)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"用户 {username} 不存在")
+
+    await db.delete(user)
+    await db.flush()
+
+    logger.warning("管理员 %s 删除了用户 %s（角色: %s）", current_user.username, username, user.role)
+
+    return DeleteAdminUserResponse(
+        success=True,
+        message=f"管理员用户 {username} 已删除",
+        username=username,
+    )

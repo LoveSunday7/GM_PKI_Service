@@ -48,3 +48,11 @@ class AdminUserListItem(BaseModel):
     username: str = Field(description="用户名")
     role: str = Field(description="角色")
     created_at: datetime = Field(description="创建时间")
+
+
+class DeleteAdminUserResponse(BaseModel):
+    """删除管理员用户响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    username: str = Field(description="被删除的用户名")
