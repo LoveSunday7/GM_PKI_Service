@@ -19,6 +19,8 @@ from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.crl import (
     CRLDownloadResponse,
     CRLGenerateResponse,
+    CRLHistoryItem,
+    CRLHistoryResponse,
     CRLQueryResponse,
     CRLRevokeRequest,
     CRLRevokeResponse,
@@ -359,3 +361,34 @@ async def download_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = 
     if crl is None:
         raise HTTPException(status_code=404, detail="暂无 CRL 发布记录")
     return CRLDownloadResponse(crl_pem=crl.crl_pem, filename=f"crl_{crl.crl_number}.crl")
+
+
+@router.get("/history", response_model=CRLHistoryResponse)
+async def get_crl_history(
+    page: int = 1,
+    page_size: int = 10,
+    db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+) -> CRLHistoryResponse:
+    """返回 CRL 发布历史列表，支持分页（需登录）."""
+    # 总数
+    count_stmt = select(sqlfunc.count(CRLPublish.id))
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    # 分页查询
+    offset = (page - 1) * page_size
+    stmt = (
+        select(CRLPublish)
+        .order_by(CRLPublish.crl_number.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    result = await db.execute(stmt)
+    items = [CRLHistoryItem.model_validate(r) for r in result.scalars().all()]
+
+    return CRLHistoryResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )

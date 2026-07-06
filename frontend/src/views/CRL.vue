@@ -14,6 +14,24 @@ const error = ref('')
 const success = ref('')
 const crlCopied = ref(false)
 
+// ── CRL 历史 ───────────────────────────────────────────────────
+const history = ref<Array<Record<string, unknown>>>([])
+const historyTotal = ref(0)
+const historyPage = ref(1)
+const historyLoading = ref(false)
+const PAGE_SIZE = 10
+
+async function loadHistory(page = 1) {
+  historyLoading.value = true
+  try {
+    const res = await crlApi.history(page, PAGE_SIZE)
+    history.value = res.items as unknown as Array<Record<string, unknown>>
+    historyTotal.value = res.total
+    historyPage.value = res.page
+  } catch { /* ignore */ }
+  finally { historyLoading.value = false }
+}
+
 // ── 序列号自动补全 ─────────────────────────────────────────────
 const showSuggestions = ref(false)
 
@@ -56,7 +74,7 @@ const revokeForm = ref({
 
 onMounted(async () => {
   await caStore.fetchStatus()
-  await Promise.all([crlStore.fetchCurrent(), certStore.fetchList()])
+  await Promise.all([crlStore.fetchCurrent(), certStore.fetchList(), loadHistory()])
 })
 
 async function handleRevoke() {
@@ -220,6 +238,42 @@ async function copyCRLPEM(pem: string) {
       </div>
       <p v-else class="empty">暂无 CRL 发布记录。</p>
     </section>
+
+    <!-- CRL 历史记录 -->
+    <section class="section">
+      <h3>📋 CRL 历史记录</h3>
+      <div v-if="historyLoading" class="loading">加载中...</div>
+      <template v-else-if="history.length">
+        <table>
+          <thead>
+            <tr>
+              <th>CRL #</th>
+              <th>签发者</th>
+              <th>更新时间</th>
+              <th>下次更新</th>
+              <th>撤销数</th>
+              <th>发布时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="h in history" :key="h.id as string">
+              <td><strong>#{{ h.crl_number }}</strong></td>
+              <td>{{ (h.issuer_dn as string)?.slice(0, 40) }}...</td>
+              <td>{{ new Date(h.this_update as string).toLocaleString() }}</td>
+              <td>{{ new Date(h.next_update as string).toLocaleString() }}</td>
+              <td>{{ h.revoked_count }}</td>
+              <td>{{ new Date(h.created_at as string).toLocaleString() }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="pager" v-if="historyTotal > PAGE_SIZE">
+          <button :disabled="historyPage <= 1" @click="loadHistory(historyPage - 1)">◀ 上一页</button>
+          <span>{{ historyPage }} / {{ Math.ceil(historyTotal / PAGE_SIZE) }}</span>
+          <button :disabled="historyPage >= Math.ceil(historyTotal / PAGE_SIZE)" @click="loadHistory(historyPage + 1)">下一页 ▶</button>
+        </div>
+      </template>
+      <p v-else class="empty">暂无历史记录。</p>
+    </section>
   </div>
 </template>
 
@@ -352,6 +406,28 @@ code {
   cursor: pointer;
 }
 .btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
+
+.loading { color: #888; font-style: italic; }
+
+/* 分页 */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+.pager button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.pager button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pager button:hover:not(:disabled) { background: #f0f0f0; }
 
 /* 自动补全 */
 .autocomplete-wrapper { position: relative; }

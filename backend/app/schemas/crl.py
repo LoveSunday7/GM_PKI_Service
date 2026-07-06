@@ -80,3 +80,27 @@ class CRLDownloadResponse(BaseModel):
 
     crl_pem: str = Field(description="CRL PEM 内容")
     filename: str = Field(description="建议文件名")
+
+
+class CRLHistoryItem(BaseModel):
+    """CRL 历史记录列表项."""
+
+    model_config = {"from_attributes": True}
+
+    id: str = Field(description="记录 UUID")
+    crl_number: int = Field(description="CRL 编号")
+    issuer_dn: str = Field(description="签发者 DN")
+    this_update: datetime = Field(description="本次更新时间")
+    next_update: datetime = Field(description="下次更新时间")
+    signature_algorithm: str = Field(description="签名算法")
+    revoked_count: int = Field(description="撤销数量")
+    created_at: datetime = Field(description="发布时间")
+
+
+class CRLHistoryResponse(BaseModel):
+    """CRL 历史记录分页响应."""
+
+    items: list[CRLHistoryItem] = Field(description="CRL 历史记录列表")
+    total: int = Field(description="总记录数")
+    page: int = Field(description="当前页码")
+    page_size: int = Field(description="每页记录数")

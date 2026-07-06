@@ -401,4 +401,12 @@ export const crlApi = {
 
   download: () =>
     download('/crl/download', `crl.pem`),
+
+  history: (page = 1, pageSize = 10) =>
+    request<{
+      items: Array<{ id: string; crl_number: number; issuer_dn: string; this_update: string; next_update: string; signature_algorithm: string; revoked_count: number; created_at: string }>
+      total: number
+      page: number
+      page_size: number
+    }>(`/crl/history?page=${page}&page_size=${pageSize}`),
 }

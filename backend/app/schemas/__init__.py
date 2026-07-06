@@ -20,6 +20,8 @@ from app.schemas.cert import (
 from app.schemas.crl import (
     CRLDownloadResponse,
     CRLGenerateResponse,
+    CRLHistoryItem,
+    CRLHistoryResponse,
     CRLQueryResponse,
     CRLRevokeRequest,
     CRLRevokeResponse,
@@ -90,6 +92,8 @@ __all__ = [
     "CRLGenerateResponse",
     "CRLQueryResponse",
     "CRLDownloadResponse",
+    "CRLHistoryItem",
+    "CRLHistoryResponse",
     # OCSP
     "OCSPQueryRequest",
     "OCSPQueryResponse",
