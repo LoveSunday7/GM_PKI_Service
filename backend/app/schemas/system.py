@@ -105,3 +105,13 @@ class DatabaseInfoResponse(BaseModel):
     connected: bool = Field(description="数据库连接状态")
     tables: list[DatabaseTableInfo] = Field(description="表列表及行数")
     total_rows: int = Field(description="所有表总行数")
+
+
+class LogQueryResponse(BaseModel):
+    """日志查询响应 — GET /api/system/logs."""
+
+    log_file: str = Field(description="日志文件路径")
+    total_lines: int = Field(description="日志文件总行数")
+    requested_lines: int = Field(description="请求返回的最大行数")
+    level_filter: str | None = Field(default=None, description="日志级别过滤条件（若指定）")
+    lines: list[str] = Field(description="匹配的日志行（最近 N 行，按时间升序）")

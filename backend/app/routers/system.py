@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -21,6 +21,7 @@ from app.schemas.system import (
     KeystoreInfoResponse,
     LogLevelRequest,
     LogLevelResponse,
+    LogQueryResponse,
     SystemConfigResponse,
 )
 
@@ -227,4 +228,38 @@ async def get_database_info(
         connected=connected,
         tables=tables,
         total_rows=total_rows,
+    )
+
+
+@router.get("/logs", response_model=LogQueryResponse)
+async def get_logs(
+    _user: CurrentUser = Depends(get_current_user),
+    lines: int = Query(default=100, ge=1, le=10000, description="返回最近 N 行"),
+    level: str | None = Query(default=None, description="按日志级别过滤（DEBUG/INFO/WARNING/ERROR）"),
+) -> LogQueryResponse:
+    """返回最近 N 行日志内容，支持按级别过滤（需登录）."""
+    log_path = os.path.join(settings.log_dir, settings.log_file)
+
+    # 读取全部日志行
+    all_lines: list[str] = []
+    if os.path.isfile(log_path):
+        with open(log_path, encoding="utf-8") as fh:
+            all_lines = fh.readlines()
+
+    total_lines = len(all_lines)
+
+    # 按级别过滤
+    if level:
+        level_upper = level.upper()
+        all_lines = [ln for ln in all_lines if f"| {level_upper}" in ln]
+
+    # 取最近 N 行（去除尾部换行符）
+    recent = [ln.rstrip("\n") for ln in all_lines[-lines:]]
+
+    return LogQueryResponse(
+        log_file=log_path,
+        total_lines=total_lines,
+        requested_lines=lines,
+        level_filter=level.upper() if level else None,
+        lines=recent,
     )

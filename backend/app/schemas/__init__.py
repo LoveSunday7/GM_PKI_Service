@@ -33,6 +33,7 @@ from app.schemas.system import (
     KeystoreInfoResponse,
     LogLevelRequest,
     LogLevelResponse,
+    LogQueryResponse,
     SystemConfigResponse,
 )
 from app.schemas.ocsp import OCSPQueryRequest, OCSPQueryResponse
@@ -61,6 +62,7 @@ __all__ = [
     "ConfigUpdateResponse",
     "DatabaseInfoResponse",
     "DatabaseTableInfo",
+    "LogQueryResponse",
     # CA
     "CAInitRequest",
     "CAInitResponse",
