@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useCRLStore } from '@/stores/crl'
 import { useCAStore } from '@/stores/ca'
 import { useCertStore } from '@/stores/cert'
+import { crlApi } from '@/api'
 
 const crlStore = useCRLStore()
 const caStore = useCAStore()
@@ -11,6 +12,14 @@ const certStore = useCertStore()
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+
+const reasonLabels: Record<string, string> = {
+  unspecified: '未指定',
+  keyCompromise: '密钥泄露',
+  affiliationChanged: '隶属关系变更',
+  superseded: '已被取代',
+  cessationOfOperation: '停止运营',
+}
 
 const revokeForm = ref({
   cert_serial_number: '',
@@ -52,6 +61,14 @@ async function handleGenerate() {
     error.value = e instanceof Error ? e.message : 'CRL generation failed'
   } finally {
     loading.value = false
+  }
+}
+
+async function handleDownload() {
+  try {
+    await crlApi.download()
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : '下载失败'
   }
 }
 </script>
@@ -106,6 +123,9 @@ async function handleGenerate() {
           <div><strong>下次更新</strong> {{ new Date(crlStore.currentCRL.next_update).toLocaleString() }}</div>
           <div><strong>撤销数量</strong> {{ crlStore.currentCRL.revoked_count }}</div>
         </div>
+        <div class="crl-actions">
+          <button class="btn-sm" @click="handleDownload">⬇ 下载 CRL</button>
+        </div>
 
         <!-- 撤销列表 -->
         <table v-if="crlStore.currentCRL.revoked_certificates?.length" style="margin-top:1rem">
@@ -119,7 +139,7 @@ async function handleGenerate() {
           <tbody>
             <tr v-for="(r, idx) in crlStore.currentCRL.revoked_certificates" :key="idx">
               <td><code>{{ r.cert_serial_number?.slice(0, 20) }}...</code></td>
-              <td>{{ r.reason }}</td>
+              <td>{{ reasonLabels[r.reason] || r.reason }}</td>
               <td>{{ new Date(r.revoked_at).toLocaleString() }}</td>
             </tr>
           </tbody>
@@ -229,8 +249,7 @@ code {
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
 }
-.empty {
-  color: #888;
-  font-style: italic;
-}
+.empty { color: #888; font-style: italic; }
+.crl-actions { margin-top: 0.75rem; }
+.btn-sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; background: #555; }
 </style>

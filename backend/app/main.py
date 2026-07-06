@@ -63,10 +63,17 @@ async def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时运行数据库迁移 + 创建密钥库目录，关闭时释放引擎."""
+    """启动: 数据库迁移 + 密钥库目录 + CRL 自动签发；关闭: 释放引擎."""
     _ensure_keystore()
     await _run_migrations()
+
+    # 启动 CRL 自动签发任务
+    from app.routers.crl import start_auto_crl, stop_auto_crl
+    start_auto_crl(settings.crl_validity_hours)
+
     yield
+
+    stop_auto_crl()
     await engine.dispose()
 
 

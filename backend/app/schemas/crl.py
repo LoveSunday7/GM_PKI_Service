@@ -7,46 +7,76 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# ── 撤销原因枚举 ──────────────────────────────────────────────
+
+REVOCATION_REASONS = [
+    "unspecified",
+    "keyCompromise",
+    "affiliationChanged",
+    "superseded",
+    "cessationOfOperation",
+]
+
+REVOCATION_REASON_LABELS: dict[str, str] = {
+    "unspecified": "未指定",
+    "keyCompromise": "密钥泄露",
+    "affiliationChanged": "隶属关系变更",
+    "superseded": "已被取代",
+    "cessationOfOperation": "停止运营",
+}
+
 
 class CRLRevokeRequest(BaseModel):
     """撤销证书的请求体."""
 
-    cert_serial_number: str = Field(max_length=64)
-    reason: str = Field(default="unspecified", max_length=128)
+    cert_serial_number: str = Field(max_length=64, description="待撤销的证书序列号（十六进制）")
+    reason: str = Field(
+        default="unspecified",
+        max_length=128,
+        description=f"撤销原因: {' / '.join(REVOCATION_REASONS)}",
+    )
 
 
 class CRLRevokeResponse(BaseModel):
-    success: bool
-    message: str
-    cert_serial_number: str | None = None
-    reason: str | None = None
-    revoked_at: datetime | None = None
+    """证书撤销成功响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    cert_serial_number: str | None = Field(default=None, description="被撤销的证书序列号")
+    reason: str | None = Field(default=None, description="撤销原因")
+    revoked_at: datetime | None = Field(default=None, description="撤销时间")
 
 
 class CRLGenerateResponse(BaseModel):
-    success: bool
-    message: str
-    crl_number: int | None = None
-    this_update: datetime | None = None
-    next_update: datetime | None = None
-    revoked_count: int | None = None
-    crl_pem: str | None = None
+    """CRL 生成成功响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    crl_number: int | None = Field(default=None, description="CRL 编号")
+    this_update: datetime | None = Field(default=None, description="本次更新时间")
+    next_update: datetime | None = Field(default=None, description="下次更新时间")
+    revoked_count: int | None = Field(default=None, description="本次撤销的证书数量")
+    crl_pem: str | None = Field(default=None, description="CRL PEM 内容")
 
 
 class CRLQueryResponse(BaseModel):
+    """CRL 查询响应."""
+
     model_config = {"from_attributes": True}
 
-    crl_number: int
-    issuer_dn: str
-    this_update: datetime
-    next_update: datetime
-    signature_algorithm: str
-    revoked_count: int
-    crl_pem: str
-    revoked_certificates: list[dict[str, Any]]
-    created_at: datetime
+    crl_number: int = Field(description="CRL 编号")
+    issuer_dn: str = Field(description="CRL 签发者 DN")
+    this_update: datetime = Field(description="本次更新时间")
+    next_update: datetime = Field(description="下次更新时间")
+    signature_algorithm: str = Field(description="签名算法")
+    revoked_count: int = Field(description="撤销的证书数量")
+    crl_pem: str = Field(description="CRL PEM 内容")
+    revoked_certificates: list[dict[str, Any]] = Field(description="撤销证书明细列表")
+    created_at: datetime = Field(description="CRL 发布时间")
 
 
 class CRLDownloadResponse(BaseModel):
-    crl_pem: str
-    filename: str
+    """CRL 文件下载响应."""
+
+    crl_pem: str = Field(description="CRL PEM 内容")
+    filename: str = Field(description="建议文件名")
