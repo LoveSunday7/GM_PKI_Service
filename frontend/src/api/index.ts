@@ -267,12 +267,22 @@ export interface KeystoreInfo {
   total_size_display: string
 }
 
+export interface DatabaseInfo {
+  database_type: string
+  connected: boolean
+  tables: Array<{ name: string; row_count: number }>
+  total_rows: number
+}
+
 export const systemApi = {
   getConfig: () =>
     request<SystemConfig>('/system/config'),
 
   getKeystoreInfo: () =>
     request<KeystoreInfo>('/system/keystore-info'),
+
+  getDatabase: () =>
+    request<DatabaseInfo>('/system/database'),
 
   updateLogLevel: (level: string) =>
     request<{ success: boolean; previous_level: string; current_level: string; message: string }>(

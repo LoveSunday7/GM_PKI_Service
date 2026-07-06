@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { systemApi, type KeystoreInfo, type SystemConfig } from '@/api'
+import { systemApi, type DatabaseInfo, type KeystoreInfo, type SystemConfig } from '@/api'
 
 defineOptions({ name: 'SettingsPage' })
 
@@ -8,6 +8,7 @@ defineOptions({ name: 'SettingsPage' })
 const loading = ref(true)
 const config = ref<SystemConfig | null>(null)
 const keystoreInfo = ref<KeystoreInfo | null>(null)
+const dbInfo = ref<DatabaseInfo | null>(null)
 const error = ref('')
 
 // ── 日志级别 ───────────────────────────────────────────────────
@@ -28,12 +29,14 @@ const editForm = ref({
 // ── 加载数据 ───────────────────────────────────────────────────
 onMounted(async () => {
   try {
-    const [cfg, keystore] = await Promise.all([
+    const [cfg, keystore, database] = await Promise.all([
       systemApi.getConfig(),
       systemApi.getKeystoreInfo(),
+      systemApi.getDatabase(),
     ])
     config.value = cfg
     keystoreInfo.value = keystore
+    dbInfo.value = database
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : '加载系统配置失败'
   } finally {
@@ -132,6 +135,46 @@ async function saveParams() {
             <span class="info-label">签名算法</span>
             <span class="info-value"><code>{{ config.default_signature_algorithm }}</code></span>
           </div>
+        </div>
+      </section>
+
+      <!-- ── 数据库信息卡片 ──────────────────────────────── -->
+      <section class="card">
+        <h3 class="card-title">🗄️ 数据库信息</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">数据库类型</span>
+            <span class="info-value">{{ dbInfo?.database_type?.toUpperCase() ?? '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">连接状态</span>
+            <span :class="['badge', dbInfo?.connected ? 'badge-on' : 'badge-error']">
+              {{ dbInfo?.connected ? '已连接' : '已断开' }}
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">数据表数量</span>
+            <span class="info-value">{{ dbInfo?.tables.length ?? '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">总行数</span>
+            <span class="info-value">{{ dbInfo?.total_rows ?? '-' }}</span>
+          </div>
+        </div>
+        <!-- 表详情列表 -->
+        <div v-if="dbInfo?.tables.length" class="file-list">
+          <h4>表详情</h4>
+          <table>
+            <thead>
+              <tr><th>表名</th><th>行数</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in dbInfo.tables" :key="t.name">
+                <td><code>{{ t.name }}</code></td>
+                <td>{{ t.row_count }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
