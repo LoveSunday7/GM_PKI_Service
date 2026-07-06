@@ -54,12 +54,22 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+# ── OpenAPI 标签元数据 ─────────────────────────────────────────────
+_tags_metadata = [
+    {"name": "认证", "description": "管理员登录、登出、Token 管理"},
+    {"name": "CA", "description": "根证书签发、查询、下载"},
+    {"name": "用户证书", "description": "用户证书签发、查询、撤销状态"},
+    {"name": "CRL", "description": "证书撤销、CRL 生成、查询、下载"},
+]
+
 app = FastAPI(
     title=settings.app_name,
+    description="基于国密算法（SM2/SM3）的 PKI 体系数字证书认证系统",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    openapi_tags=_tags_metadata,
 )
 
 # ── 跨域配置 ─────────────────────────────────────────────────────
@@ -67,8 +77,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -103,6 +113,13 @@ async def health_check():
         "service": settings.app_name,
         "database": db_status,
     }
+
+
+@app.get("/")
+async def root():
+    """根路径重定向到 API 文档."""
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/api/docs")
 
 
 # ── 直接运行入口 ─────────────────────────────────────────────────
