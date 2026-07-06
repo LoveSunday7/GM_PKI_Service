@@ -17,10 +17,16 @@ interface CertDetail {}
 export const useCertStore = defineStore('cert', () => {
   const certs = ref<CertItem[]>([])
   const current = ref<CertDetail | null>(null)
+  const total = ref(0)
+  const page = ref(1)
+  const pageSize = ref(20)
 
-  async function fetchList(params?: { cert_type?: string; status?: string }) {
+  async function fetchList(params?: { cert_type?: string; status?: string; page?: number; page_size?: number }) {
     const res = await certApi.list(params)
-    certs.value = res
+    certs.value = res.items
+    total.value = res.total
+    page.value = res.page
+    pageSize.value = res.page_size
     return certs.value
   }
 
@@ -39,5 +45,5 @@ export const useCertStore = defineStore('cert', () => {
     return await certApi.status(serial)
   }
 
-  return { certs, current, fetchList, issue, fetchDetail, checkStatus }
+  return { certs, current, total, page, pageSize, fetchList, issue, fetchDetail, checkStatus }
 })

@@ -15,6 +15,7 @@ from app.schemas.cert import (
     CertIssueRequest,
     CertIssueResponse,
     CertListItem,
+    CertListResponse,
     CertStatusResponse,
 )
 from app.schemas.crl import (
@@ -83,6 +84,7 @@ __all__ = [
     "CertIssueRequest",
     "CertIssueResponse",
     "CertListItem",
+    "CertListResponse",
     "CertDetailResponse",
     "CertDownloadResponse",
     "CertStatusResponse",

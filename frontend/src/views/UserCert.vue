@@ -17,7 +17,7 @@ const selectedSerials = ref<Set<string>>(new Set())
 const batchRevoking = ref(false)
 
 const activeFilteredCerts = computed(() =>
-  filteredCerts.value.filter((c: { status: string }) => c.status === 'active')
+  certStore.certs.filter((c: { status: string }) => c.status === 'active')
 )
 
 function toggleSelect(serial: string) {
@@ -49,7 +49,7 @@ async function handleBatchRevoke() {
     }
   }
   selectedSerials.value = new Set()
-  await certStore.fetchList()
+  loadCerts(1)
   batchRevoking.value = false
   if (failed) {
     toast.error(`撤销完成：${done} 张成功，${failed} 张失败`)
@@ -58,20 +58,24 @@ async function handleBatchRevoke() {
   }
 }
 
-// ── 筛选 ───────────────────────────────────────────────────────
+// ── 筛选 + 分页 ────────────────────────────────────────────────
 const filterType = ref('')
 const filterStatus = ref('')
+const PAGE_SIZE = 20
 
-const filteredCerts = computed(() => {
-  let certs = certStore.certs
-  if (filterType.value) {
-    certs = certs.filter((c: { cert_type: string }) => c.cert_type === filterType.value)
-  }
-  if (filterStatus.value) {
-    certs = certs.filter((c: { status: string }) => c.status === filterStatus.value)
-  }
-  return certs
-})
+const totalPages = computed(() => Math.max(1, Math.ceil(certStore.total / certStore.pageSize)))
+
+function loadCerts(page = 1) {
+  certLoading.value = true
+  const p: Record<string, unknown> = { page, page_size: PAGE_SIZE }
+  if (filterType.value) p.cert_type = filterType.value
+  if (filterStatus.value) p.status = filterStatus.value
+  certStore.fetchList(p as { page?: number; page_size?: number; cert_type?: string; status?: string }).finally(() => { certLoading.value = false })
+}
+
+function onFilterChange() {
+  loadCerts(1)
+}
 
 const form = ref({
   user_name: '',
@@ -93,10 +97,8 @@ const copiedField = ref('')
 const certStatus = ref<{ status?: string; revoked_at?: string; reason?: string } | null>(null)
 
 onMounted(async () => {
-  certLoading.value = true
   await caStore.fetchStatus()
-  await certStore.fetchList()
-  certLoading.value = false
+  loadCerts()
 })
 
 async function handleIssue() {
@@ -107,7 +109,7 @@ async function handleIssue() {
     const res = await certStore.issue(payload)
     const issueRes = res as { serial_number?: string }
     toast.success(`签发成功！序列号: ${issueRes.serial_number?.slice(0, 20)}...`)
-    await certStore.fetchList()
+    loadCerts(1)
     form.value.user_name = ''
     form.value.email = ''
   } catch (e: unknown) {
@@ -203,7 +205,7 @@ async function copyText(text: string, field: string) {
       <div class="filter-bar" v-if="certStore.certs.length">
         <label class="filter-label">
           类型
-          <select v-model="filterType">
+          <select v-model="filterType" @change="onFilterChange()">
             <option value="">全部</option>
             <option value="sign">签名证书</option>
             <option value="encrypt">加密证书</option>
@@ -211,13 +213,13 @@ async function copyText(text: string, field: string) {
         </label>
         <label class="filter-label">
           状态
-          <select v-model="filterStatus">
+          <select v-model="filterStatus" @change="onFilterChange()">
             <option value="">全部</option>
             <option value="active">有效</option>
             <option value="revoked">已撤销</option>
           </select>
         </label>
-        <span class="filter-count">{{ filteredCerts.length }} / {{ certStore.certs.length }} 张</span>
+        <span class="filter-count">第 {{ certStore.page }} 页，共 {{ certStore.total }} 张</span>
       </div>
 
       <!-- 批量操作栏 -->
@@ -248,7 +250,7 @@ async function copyText(text: string, field: string) {
         </thead>
         <tbody>
           <tr
-            v-for="c in filteredCerts"
+            v-for="c in certStore.certs"
             :key="c.id"
             :class="{ 'row-selected': selectedCert?.serial_number === c.serial_number }"
           >
@@ -279,6 +281,19 @@ async function copyText(text: string, field: string) {
           </tr>
         </tbody>
       </table>
+      </div>
+
+      <!-- 分页 -->
+      <div class="pager" v-if="totalPages > 1">
+        <button :disabled="certStore.page <= 1" @click="loadCerts(certStore.page - 1)">◀ 上一页</button>
+        <template v-for="p in totalPages" :key="p">
+          <button v-if="Math.abs(p - certStore.page) <= 2 || p === 1 || p === totalPages"
+            :class="['page-btn', { active: p === certStore.page }]"
+            @click="loadCerts(p)"
+          >{{ p }}</button>
+          <span v-else-if="Math.abs(p - certStore.page) === 3" class="page-dots">…</span>
+        </template>
+        <button :disabled="certStore.page >= totalPages" @click="loadCerts(certStore.page + 1)">下一页 ▶</button>
       </div>
       </template>
       <!-- 骨架屏 -->
@@ -419,6 +434,29 @@ textarea { resize: vertical; font-family: monospace; }
 /* 可点击的表格单元格 */
 .clickable-cell { cursor: pointer; transition: background 0.15s; }
 .clickable-cell:hover { background: #f8f9fa; }
+
+/* 分页 */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+.pager button {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  min-width: 32px;
+}
+.pager button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pager button:hover:not(:disabled) { background: #f0f0f0; }
+.pager .page-btn.active { background: #0f3460; color: #fff; border-color: #0f3460; }
+.pager .page-dots { padding: 0 0.2rem; color: #999; }
 button { padding: 0.6rem 1.5rem; background: #1a1a2e; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #555; }

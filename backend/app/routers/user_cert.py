@@ -20,6 +20,7 @@ from app.schemas.cert import (
     CertIssueRequest,
     CertIssueResponse,
     CertListItem,
+    CertListResponse,
     CertStatusResponse,
 )
 from app.schemas.verify import (
@@ -204,23 +205,39 @@ async def recent_activity(db: AsyncSession = Depends(get_db), _user: CurrentUser
     return {"activities": activities[:10]}
 
 
-@router.get("/list", response_model=list[CertListItem])
+@router.get("/list", response_model=CertListResponse)
 async def list_certs(
     cert_type: str | None = None,
     status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
-) -> list[CertListItem]:
-    """查询用户证书列表，可按类型和状态筛选."""
-    stmt = select(UserCert)
+) -> CertListResponse:
+    """查询用户证书列表，支持分页及按类型、状态筛选."""
+    # 构建基础查询
+    base_stmt = select(UserCert)
     if cert_type:
-        stmt = stmt.where(UserCert.cert_type == cert_type)
+        base_stmt = base_stmt.where(UserCert.cert_type == cert_type)
     if status:
-        stmt = stmt.where(UserCert.status == status)
-    stmt = stmt.order_by(UserCert.created_at.desc())
+        base_stmt = base_stmt.where(UserCert.status == status)
+
+    # 总数
+    count_stmt = select(sqlfunc.count()).select_from(base_stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    # 分页查询
+    offset = (page - 1) * page_size
+    stmt = base_stmt.order_by(UserCert.created_at.desc()).offset(offset).limit(page_size)
     result = await db.execute(stmt)
-    certs = result.scalars().all()
-    return [CertListItem.model_validate(c) for c in certs]
+    items = [CertListItem.model_validate(c) for c in result.scalars().all()]
+
+    return CertListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/{serial_number}", response_model=CertDetailResponse)

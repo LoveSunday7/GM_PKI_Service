@@ -40,6 +40,15 @@ class CertIssueResponse(BaseModel):
     root_cert_pem: str | None = Field(default=None, description="根证书 PEM")
 
 
+class CertListResponse(BaseModel):
+    """用户证书分页列表响应."""
+
+    items: list[CertListItem] = Field(description="证书列表")
+    total: int = Field(description="总记录数")
+    page: int = Field(description="当前页码")
+    page_size: int = Field(description="每页记录数")
+
+
 class CertListItem(BaseModel):
     """用户证书列表项."""
 

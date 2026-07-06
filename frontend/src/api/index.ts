@@ -224,12 +224,14 @@ export const certApi = {
       body: JSON.stringify(data),
     }),
 
-  list: (params?: { cert_type?: string; status?: string }) => {
+  list: (params?: { cert_type?: string; status?: string; page?: number; page_size?: number }) => {
     const qs = new URLSearchParams()
     if (params?.cert_type) qs.set('cert_type', params.cert_type)
     if (params?.status) qs.set('status', params.status)
+    if (params?.page) qs.set('page', String(params.page))
+    if (params?.page_size) qs.set('page_size', String(params.page_size))
     const q = qs.toString()
-    return request<{ id: string; serial_number: string; cert_type: string; subject_dn: string; user_name: string; not_after: string; status: string }[]>(`/cert/list${q ? `?${q}` : ''}`)
+    return request<{ items: Array<{ id: string; serial_number: string; cert_type: string; subject_dn: string; user_name: string; not_after: string; status: string }>; total: number; page: number; page_size: number }>(`/cert/list${q ? `?${q}` : ''}`)
   },
 
   detail: (serial: string) => request<Record<string, unknown>>(`/cert/${serial}`),
