@@ -2,41 +2,39 @@
 import { onMounted, ref } from 'vue'
 import { adminApi, type AdminUserItem } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
+import { formatError } from '@/utils/errors'
 
 defineOptions({ name: 'AdminUsersPage' })
 
+const toast = useToast()
 const authStore = useAuthStore()
 
 // ── 列表状态 ───────────────────────────────────────────────────
 const loading = ref(true)
 const users = ref<AdminUserItem[]>([])
-const listError = ref('')
 
 // ── 创建表单 ───────────────────────────────────────────────────
 const creating = ref(false)
 const createForm = ref({ username: '', password: '', role: 'admin' })
 const createError = ref('')
-const createMsg = ref('')
 
 // ── 删除确认 ───────────────────────────────────────────────────
-const deleting = ref('') // 正在删除的用户名，空表示无操作
-const deleteError = ref('')
+const deleting = ref('')
 
 // ── 密码弹窗 ───────────────────────────────────────────────────
 const pwdTarget = ref<AdminUserItem | null>(null)
 const pwdForm = ref({ newPassword: '' })
 const pwdSaving = ref(false)
 const pwdError = ref('')
-const pwdMsg = ref('')
 
 // ── 加载用户列表 ───────────────────────────────────────────────
 async function loadUsers() {
   loading.value = true
-  listError.value = ''
   try {
     users.value = await adminApi.list()
   } catch (e: unknown) {
-    listError.value = e instanceof Error ? e.message : '加载用户列表失败'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -48,19 +46,17 @@ onMounted(loadUsers)
 async function handleCreate() {
   creating.value = true
   createError.value = ''
-  createMsg.value = ''
   try {
     const res = await adminApi.create({
       username: createForm.value.username,
       password: createForm.value.password,
       role: createForm.value.role,
     })
-    createMsg.value = res.message
+    toast.success(res.message)
     createForm.value = { username: '', password: '', role: 'admin' }
     await loadUsers()
-    setTimeout(() => { createMsg.value = '' }, 3000)
   } catch (e: unknown) {
-    createError.value = e instanceof Error ? e.message : '创建失败'
+    createError.value = formatError(e)
   } finally {
     creating.value = false
   }
@@ -70,12 +66,12 @@ async function handleCreate() {
 async function handleDelete(username: string) {
   if (deleting.value) return
   deleting.value = username
-  deleteError.value = ''
   try {
-    await adminApi.delete(username)
+    const res = await adminApi.delete(username)
+    toast.success(res.message)
     await loadUsers()
   } catch (e: unknown) {
-    deleteError.value = e instanceof Error ? e.message : '删除失败'
+    toast.error(formatError(e))
   } finally {
     deleting.value = ''
   }
@@ -86,7 +82,6 @@ function openPwdModal(user: AdminUserItem) {
   pwdTarget.value = user
   pwdForm.value.newPassword = ''
   pwdError.value = ''
-  pwdMsg.value = ''
 }
 
 function closePwdModal() {
@@ -97,13 +92,12 @@ async function handleChangePwd() {
   if (!pwdTarget.value) return
   pwdSaving.value = true
   pwdError.value = ''
-  pwdMsg.value = ''
   try {
     const res = await adminApi.changePassword(pwdTarget.value.username, pwdForm.value.newPassword)
-    pwdMsg.value = res.message
-    setTimeout(closePwdModal, 1500)
+    toast.success(res.message)
+    closePwdModal()
   } catch (e: unknown) {
-    pwdError.value = e instanceof Error ? e.message : '修改密码失败'
+    pwdError.value = formatError(e)
   } finally {
     pwdSaving.value = false
   }
@@ -140,7 +134,6 @@ async function handleChangePwd() {
           </button>
         </div>
         <p v-if="createError" class="msg msg-err">{{ createError }}</p>
-        <p v-if="createMsg" class="msg msg-ok">{{ createMsg }}</p>
       </div>
     </section>
 
@@ -148,11 +141,18 @@ async function handleChangePwd() {
     <section class="card">
       <h3 class="card-title">📋 用户列表</h3>
 
-      <div v-if="loading" class="loading">加载中...</div>
-      <p v-if="listError" class="msg msg-err">{{ listError }}</p>
-      <p v-if="deleteError" class="msg msg-err">{{ deleteError }}</p>
-
-      <table v-if="!loading && users.length" class="table">
+      <!-- 骨架屏 -->
+      <div v-if="loading" class="skeleton-table">
+        <div v-for="i in 3" :key="i" class="skeleton-row">
+          <div class="skeleton skeleton-cell" style="width:20%" />
+          <div class="skeleton skeleton-cell" style="width:12%" />
+          <div class="skeleton skeleton-cell" style="width:22%" />
+          <div class="skeleton skeleton-cell" style="width:15%" />
+        </div>
+      </div>
+      <template v-else-if="users.length">
+      <div class="responsive-table">
+      <table class="table">
         <thead>
           <tr>
             <th>用户名</th>
@@ -163,15 +163,15 @@ async function handleChangePwd() {
         </thead>
         <tbody>
           <tr v-for="u in users" :key="u.id">
-            <td>
+            <td data-label="用户名">
               <span class="username">{{ u.username }}</span>
               <span v-if="u.username === authStore.username" class="tag-me">我</span>
             </td>
-            <td>
+            <td data-label="角色">
               <span :class="['badge', 'badge-' + u.role]">{{ u.role }}</span>
             </td>
-            <td>{{ new Date(u.created_at).toLocaleString() }}</td>
-            <td class="actions">
+            <td data-label="创建时间">{{ new Date(u.created_at).toLocaleString() }}</td>
+            <td data-label="操作" class="actions">
               <button class="btn btn-sm btn-outline" @click="openPwdModal(u)">🔑 改密</button>
               <button
                 class="btn btn-sm btn-danger"
@@ -184,7 +184,13 @@ async function handleChangePwd() {
           </tr>
         </tbody>
       </table>
-      <p v-else-if="!loading" class="empty">暂无用户</p>
+      </div>
+      </template>
+      <div v-else class="empty-state">
+        <div class="empty-icon">👥</div>
+        <div class="empty-title">暂无管理员用户</div>
+        <div class="empty-hint">请在上方填写信息创建第一个管理员账户</div>
+      </div>
     </section>
 
     <!-- ── 修改密码弹窗 ────────────────────────────────────── -->
@@ -199,7 +205,6 @@ async function handleChangePwd() {
             <input v-model="pwdForm.newPassword" type="password" placeholder="至少 6 位" maxlength="128" @keyup.enter="handleChangePwd" />
           </label>
           <p v-if="pwdError" class="msg msg-err">{{ pwdError }}</p>
-          <p v-if="pwdMsg" class="msg msg-ok">{{ pwdMsg }}</p>
         </div>
 
         <div class="modal-actions">

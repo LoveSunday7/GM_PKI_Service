@@ -3,12 +3,14 @@ import { computed, onMounted, ref } from 'vue'
 import { useCertStore } from '@/stores/cert'
 import { useCAStore } from '@/stores/ca'
 import { certApi, crlApi } from '@/api'
+import { useToast } from '@/composables/useToast'
+import { formatError } from '@/utils/errors'
 
+const toast = useToast()
 const certStore = useCertStore()
 const caStore = useCAStore()
 const loading = ref(false)
-const error = ref('')
-const success = ref('')
+const certLoading = ref(true)
 
 // ── 批量撤销 ───────────────────────────────────────────────────
 const selectedSerials = ref<Set<string>>(new Set())
@@ -36,8 +38,6 @@ function toggleSelectAll() {
 async function handleBatchRevoke() {
   if (selectedSerials.value.size === 0) return
   batchRevoking.value = true
-  error.value = ''
-  success.value = ''
   let done = 0
   let failed = 0
   for (const serial of selectedSerials.value) {
@@ -52,10 +52,9 @@ async function handleBatchRevoke() {
   await certStore.fetchList()
   batchRevoking.value = false
   if (failed) {
-    error.value = `撤销完成：${done} 张成功，${failed} 张失败`
+    toast.error(`撤销完成：${done} 张成功，${failed} 张失败`)
   } else {
-    success.value = `已成功撤销 ${done} 张证书`
-    setTimeout(() => { success.value = '' }, 5000)
+    toast.success(`已成功撤销 ${done} 张证书`)
   }
 }
 
@@ -93,26 +92,26 @@ const copiedField = ref('')
 // 状态查询结果
 const certStatus = ref<{ status?: string; revoked_at?: string; reason?: string } | null>(null)
 
-onMounted(() => {
-  caStore.fetchStatus()
-  certStore.fetchList()
+onMounted(async () => {
+  certLoading.value = true
+  await caStore.fetchStatus()
+  await certStore.fetchList()
+  certLoading.value = false
 })
 
 async function handleIssue() {
   loading.value = true
-  error.value = ''
-  success.value = ''
   try {
     const payload: Record<string, unknown> = { ...form.value }
     if (!payload.public_key_pem) delete payload.public_key_pem
     const res = await certStore.issue(payload)
     const issueRes = res as { serial_number?: string }
-    success.value = `签发成功！序列号: ${issueRes.serial_number?.slice(0, 20)}...`
+    toast.success(`签发成功！序列号: ${issueRes.serial_number?.slice(0, 20)}...`)
     await certStore.fetchList()
     form.value.user_name = ''
     form.value.email = ''
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '签发失败'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -141,7 +140,7 @@ async function handleDownload(serial: string) {
   try {
     await certApi.download(serial)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '下载失败'
+    toast.error(formatError(e))
   }
 }
 
@@ -191,8 +190,6 @@ async function copyText(text: string, field: string) {
           </button>
         </div>
       </form>
-      <p v-if="success" class="ok">{{ success }}</p>
-      <p v-if="error" class="error">{{ error }}</p>
     </section>
     <section class="section" v-else>
       <p class="warn">⚠️ 请先初始化 CA。</p>
@@ -232,7 +229,9 @@ async function copyText(text: string, field: string) {
         <button class="btn btn-sm btn-ghost" @click="selectedSerials = new Set()">取消选择</button>
       </div>
 
-      <table v-if="certStore.certs.length">
+      <template v-if="certStore.certs.length">
+      <div class="responsive-table">
+      <table>
         <thead>
           <tr>
             <th class="col-cb">
@@ -253,7 +252,7 @@ async function copyText(text: string, field: string) {
             :key="c.id"
             :class="{ 'row-selected': selectedCert?.serial_number === c.serial_number }"
           >
-            <td class="col-cb">
+            <td class="col-cb" data-label="">
               <input
                 v-if="c.status === 'active'"
                 type="checkbox"
@@ -262,25 +261,43 @@ async function copyText(text: string, field: string) {
                 @change="toggleSelect(c.serial_number)"
               />
             </td>
-            <td @click="showDetail(c.serial_number)" class="clickable-cell"><code>{{ c.serial_number?.slice(0, 14) }}...</code></td>
-            <td @click="showDetail(c.serial_number)" class="clickable-cell">
+            <td data-label="序列号" @click="showDetail(c.serial_number)" class="clickable-cell"><code>{{ c.serial_number?.slice(0, 14) }}...</code></td>
+            <td data-label="类型" @click="showDetail(c.serial_number)" class="clickable-cell">
               <span class="badge" :class="c.cert_type === 'sign' ? 'badge-blue' : 'badge-purple'">
                 {{ c.cert_type }}
               </span>
             </td>
-            <td @click="showDetail(c.serial_number)" class="clickable-cell">{{ c.subject_dn }}</td>
-            <td @click="showDetail(c.serial_number)" class="clickable-cell">{{ c.user_name }}</td>
-            <td @click="showDetail(c.serial_number)" class="clickable-cell">{{ new Date(c.not_after).toLocaleDateString() }}</td>
-            <td @click="showDetail(c.serial_number)" class="clickable-cell">
+            <td data-label="主题 DN" @click="showDetail(c.serial_number)" class="clickable-cell">{{ c.subject_dn }}</td>
+            <td data-label="用户" @click="showDetail(c.serial_number)" class="clickable-cell">{{ c.user_name }}</td>
+            <td data-label="到期日期" @click="showDetail(c.serial_number)" class="clickable-cell">{{ new Date(c.not_after).toLocaleDateString() }}</td>
+            <td data-label="状态" @click="showDetail(c.serial_number)" class="clickable-cell">
               <span :class="['badge', c.status === 'active' ? 'badge-green' : 'badge-red']">{{ c.status }}</span>
             </td>
-            <td>
+            <td data-label="操作" class="actions">
               <button class="btn-sm" @click.stop="handleDownload(c.serial_number)">⬇ 下载</button>
             </td>
           </tr>
         </tbody>
       </table>
-      <p v-else class="empty">暂无已签发证书。</p>
+      </div>
+      </template>
+      <!-- 骨架屏 -->
+      <div v-else-if="certLoading" class="skeleton-table">
+        <div v-for="i in 4" :key="i" class="skeleton-row">
+          <div class="skeleton skeleton-cell" style="width:12%" />
+          <div class="skeleton skeleton-cell" style="width:8%" />
+          <div class="skeleton skeleton-cell" style="width:30%" />
+          <div class="skeleton skeleton-cell" style="width:10%" />
+          <div class="skeleton skeleton-cell" style="width:12%" />
+          <div class="skeleton skeleton-cell" style="width:8%" />
+        </div>
+      </div>
+      <!-- 空状态 -->
+      <div v-else class="empty-state">
+        <div class="empty-icon">📜</div>
+        <div class="empty-title">暂无已签发证书</div>
+        <div class="empty-hint">请先初始化 CA，然后在上方填写信息签发第一张证书</div>
+      </div>
     </section>
 
     <!-- 证书详情面板 -->

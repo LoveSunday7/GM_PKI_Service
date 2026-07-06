@@ -2,11 +2,13 @@
 import { onMounted, ref } from 'vue'
 import { useCAStore } from '@/stores/ca'
 import { caApi, systemApi } from '@/api'
+import { useToast } from '@/composables/useToast'
+import { formatError } from '@/utils/errors'
 
+const toast = useToast()
 const caStore = useCAStore()
 const loading = ref(false)
-const error = ref('')
-const success = ref('')
+const listLoading = ref(true)
 const keystorePath = ref('')
 
 const form = ref({
@@ -25,8 +27,10 @@ const detailLoading = ref(false)
 const pemCopied = ref(false)
 
 onMounted(async () => {
-  caStore.fetchStatus()
-  caStore.fetchRootCerts()
+  listLoading.value = true
+  await caStore.fetchStatus()
+  await caStore.fetchRootCerts()
+  listLoading.value = false
   try {
     const cfg = await systemApi.getConfig()
     keystorePath.value = cfg.keystore_dir
@@ -35,14 +39,12 @@ onMounted(async () => {
 
 async function handleInit() {
   loading.value = true
-  error.value = ''
-  success.value = ''
   try {
     const res = await caStore.initialize(form.value)
     await caStore.fetchRootCerts()
-    success.value = `根 CA 签发成功！序列号: ${(res as { serial_number?: string }).serial_number?.slice(0, 20)}...`
+    toast.success(`根 CA 签发成功！序列号: ${(res as { serial_number?: string }).serial_number?.slice(0, 20)}...`)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : 'Initialization failed'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -85,7 +87,7 @@ async function handleDownload(serial: string) {
   try {
     await caApi.downloadRootCert(serial)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '下载失败'
+    toast.error(formatError(e))
   }
 }
 </script>
@@ -100,9 +102,6 @@ async function handleDownload(serial: string) {
       <p v-if="caStore.initialized" class="ok">✅ CA 已初始化 — {{ caStore.caName }}</p>
       <p v-else class="warn">⚠️ CA 尚未初始化，请使用下方表单进行初始化。</p>
     </section>
-
-    <!-- 成功消息 -->
-    <p v-if="success" class="success-msg">{{ success }}</p>
 
     <!-- 初始化表单 -->
     <section class="section" v-if="!caStore.initialized">
@@ -148,13 +147,14 @@ async function handleDownload(serial: string) {
           💾 密钥库路径：<code>{{ keystorePath }}/root_{序列号}.pem</code>（证书）与 <code>.key</code>（私钥）
         </div>
       </form>
-      <p v-if="error" class="error">{{ error }}</p>
     </section>
 
     <!-- 根证书列表 -->
     <section class="section">
       <h3>根证书列表</h3>
-      <table v-if="caStore.rootCerts.length">
+      <template v-if="caStore.rootCerts.length">
+      <div class="responsive-table">
+      <table>
         <thead>
           <tr>
             <th>序列号</th>
@@ -174,19 +174,36 @@ async function handleDownload(serial: string) {
             class="clickable-row"
             :class="{ 'row-selected': selectedCert?.serial_number === c.serial_number }"
           >
-            <td><code>{{ c.serial_number?.slice(0, 16) }}...</code></td>
-            <td>{{ c.subject_dn }}</td>
-            <td>{{ c.signature_algorithm }}</td>
-            <td>{{ new Date(c.not_before).toLocaleDateString() }}</td>
-            <td>{{ new Date(c.not_after).toLocaleDateString() }}</td>
-            <td><span class="badge badge-green">{{ c.status }}</span></td>
-            <td>
+            <td data-label="序列号"><code>{{ c.serial_number?.slice(0, 16) }}...</code></td>
+            <td data-label="主题 DN">{{ c.subject_dn }}</td>
+            <td data-label="算法">{{ c.signature_algorithm }}</td>
+            <td data-label="生效日期">{{ new Date(c.not_before).toLocaleDateString() }}</td>
+            <td data-label="到期日期">{{ new Date(c.not_after).toLocaleDateString() }}</td>
+            <td data-label="状态"><span class="badge badge-green">{{ c.status }}</span></td>
+            <td data-label="操作">
               <button class="btn-sm" @click.stop="handleDownload(c.serial_number)">⬇ 下载</button>
             </td>
           </tr>
         </tbody>
       </table>
-      <p v-else class="empty">暂无根证书。</p>
+      </div>
+      </template>
+      <!-- 骨架屏 -->
+      <div v-else-if="listLoading" class="skeleton-table">
+        <div v-for="i in 3" :key="i" class="skeleton-row">
+          <div class="skeleton skeleton-cell" style="width:20%" />
+          <div class="skeleton skeleton-cell" style="width:28%" />
+          <div class="skeleton skeleton-cell" style="width:12%" />
+          <div class="skeleton skeleton-cell" style="width:14%" />
+          <div class="skeleton skeleton-cell" style="width:10%" />
+        </div>
+      </div>
+      <!-- 空状态 -->
+      <div v-else class="empty-state">
+        <div class="empty-icon">🔐</div>
+        <div class="empty-title">暂无根证书</div>
+        <div class="empty-hint">CA 尚未初始化，请先填写初始化表单生成根证书</div>
+      </div>
     </section>
 
     <!-- 证书详情面板 -->

@@ -4,14 +4,15 @@ import { useCRLStore } from '@/stores/crl'
 import { useCAStore } from '@/stores/ca'
 import { useCertStore } from '@/stores/cert'
 import { crlApi } from '@/api'
+import { useToast } from '@/composables/useToast'
+import { formatError } from '@/utils/errors'
 
+const toast = useToast()
 const crlStore = useCRLStore()
 const caStore = useCAStore()
 const certStore = useCertStore()
 
 const loading = ref(false)
-const error = ref('')
-const success = ref('')
 const crlCopied = ref(false)
 
 // ── CRL 历史 ───────────────────────────────────────────────────
@@ -79,17 +80,15 @@ onMounted(async () => {
 
 async function handleRevoke() {
   loading.value = true
-  error.value = ''
-  success.value = ''
   try {
     const res = await crlStore.revoke(revokeForm.value)
     const revokeRes = res as { cert_serial_number?: string }
-    success.value = `Revoked: ${revokeRes.cert_serial_number?.slice(0, 20)}...`
+    toast.success(`撤销成功: ${revokeRes.cert_serial_number?.slice(0, 20)}...`)
     revokeForm.value.cert_serial_number = ''
     await certStore.fetchList()
     await crlStore.fetchCurrent()
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : 'Revoke failed'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -97,14 +96,13 @@ async function handleRevoke() {
 
 async function handleGenerate() {
   loading.value = true
-  error.value = ''
-  success.value = ''
   try {
     const genRes = await crlStore.generate() as { crl_number?: number; revoked_count?: number }
-    success.value = `CRL #${genRes.crl_number} generated with ${genRes.revoked_count} revocations`
+    toast.success(`CRL #${genRes.crl_number} 已生成，包含 ${genRes.revoked_count} 条撤销`)
     await crlStore.fetchCurrent()
+    await loadHistory(1)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : 'CRL generation failed'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -114,7 +112,7 @@ async function handleDownload() {
   try {
     await crlApi.download()
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '下载失败'
+    toast.error(formatError(e))
   }
 }
 
@@ -188,10 +186,6 @@ async function copyCRLPEM(pem: string) {
       </button>
     </section>
 
-    <!-- 消息 -->
-    <p v-if="success" class="ok">{{ success }}</p>
-    <p v-if="error" class="error">{{ error }}</p>
-
     <!-- 当前 CRL -->
     <section class="section">
       <h3>当前 CRL</h3>
@@ -219,6 +213,7 @@ async function copyCRLPEM(pem: string) {
         </div>
 
         <!-- 撤销列表 -->
+        <div class="responsive-table">
         <table v-if="crlStore.currentCRL.revoked_certificates?.length" style="margin-top:1rem">
           <thead>
             <tr>
@@ -229,14 +224,19 @@ async function copyCRLPEM(pem: string) {
           </thead>
           <tbody>
             <tr v-for="(r, idx) in crlStore.currentCRL.revoked_certificates" :key="idx">
-              <td><code>{{ r.cert_serial_number?.slice(0, 20) }}...</code></td>
-              <td>{{ reasonLabels[r.reason] || r.reason }}</td>
-              <td>{{ new Date(r.revoked_at).toLocaleString() }}</td>
+              <td data-label="序列号"><code>{{ r.cert_serial_number?.slice(0, 20) }}...</code></td>
+              <td data-label="撤销原因">{{ reasonLabels[r.reason] || r.reason }}</td>
+              <td data-label="撤销时间">{{ new Date(r.revoked_at).toLocaleString() }}</td>
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
-      <p v-else class="empty">暂无 CRL 发布记录。</p>
+      <div v-else class="empty-state">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">暂无 CRL 发布记录</div>
+        <div class="empty-hint">撤销证书后点击"生成 CRL"即可创建第一条发布记录</div>
+      </div>
     </section>
 
     <!-- CRL 历史记录 -->
@@ -244,6 +244,7 @@ async function copyCRLPEM(pem: string) {
       <h3>📋 CRL 历史记录</h3>
       <div v-if="historyLoading" class="loading">加载中...</div>
       <template v-else-if="history.length">
+        <div class="responsive-table">
         <table>
           <thead>
             <tr>
@@ -257,22 +258,27 @@ async function copyCRLPEM(pem: string) {
           </thead>
           <tbody>
             <tr v-for="h in history" :key="h.id as string">
-              <td><strong>#{{ h.crl_number }}</strong></td>
-              <td>{{ (h.issuer_dn as string)?.slice(0, 40) }}...</td>
-              <td>{{ new Date(h.this_update as string).toLocaleString() }}</td>
-              <td>{{ new Date(h.next_update as string).toLocaleString() }}</td>
-              <td>{{ h.revoked_count }}</td>
-              <td>{{ new Date(h.created_at as string).toLocaleString() }}</td>
+              <td data-label="CRL #"><strong>#{{ h.crl_number }}</strong></td>
+              <td data-label="签发者">{{ (h.issuer_dn as string)?.slice(0, 40) }}...</td>
+              <td data-label="更新时间">{{ new Date(h.this_update as string).toLocaleString() }}</td>
+              <td data-label="下次更新">{{ new Date(h.next_update as string).toLocaleString() }}</td>
+              <td data-label="撤销数">{{ h.revoked_count }}</td>
+              <td data-label="发布时间">{{ new Date(h.created_at as string).toLocaleString() }}</td>
             </tr>
           </tbody>
         </table>
+        </div>
         <div class="pager" v-if="historyTotal > PAGE_SIZE">
           <button :disabled="historyPage <= 1" @click="loadHistory(historyPage - 1)">◀ 上一页</button>
           <span>{{ historyPage }} / {{ Math.ceil(historyTotal / PAGE_SIZE) }}</span>
           <button :disabled="historyPage >= Math.ceil(historyTotal / PAGE_SIZE)" @click="loadHistory(historyPage + 1)">下一页 ▶</button>
         </div>
       </template>
-      <p v-else class="empty">暂无历史记录。</p>
+      <div v-else class="empty-state">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">暂无 CRL 历史记录</div>
+        <div class="empty-hint">生成 CRL 后历史记录将在此展示</div>
+      </div>
     </section>
   </div>
 </template>

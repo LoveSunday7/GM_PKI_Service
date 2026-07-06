@@ -2,12 +2,16 @@
 import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
+import ToastContainer from '@/components/ToastContainer.vue'
 
 const route = useRoute()
 const isLoginPage = computed(() => route.name === 'Login')
 </script>
 
 <template>
+  <!-- Toast 全局通知 -->
+  <ToastContainer />
+
   <!-- 登录页：全屏，无布局 -->
   <RouterView v-if="isLoginPage" />
 

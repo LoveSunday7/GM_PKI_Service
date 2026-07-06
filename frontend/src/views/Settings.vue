@@ -194,17 +194,19 @@ function handleDownloadLogs() {
         <!-- 表详情列表 -->
         <div v-if="dbInfo?.tables.length" class="file-list">
           <h4>表详情</h4>
+          <div class="responsive-table">
           <table>
             <thead>
               <tr><th>表名</th><th>行数</th></tr>
             </thead>
             <tbody>
               <tr v-for="t in dbInfo.tables" :key="t.name">
-                <td><code>{{ t.name }}</code></td>
-                <td>{{ t.row_count }}</td>
+                <td data-label="表名"><code>{{ t.name }}</code></td>
+                <td data-label="行数">{{ t.row_count }}</td>
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 
@@ -228,17 +230,19 @@ function handleDownloadLogs() {
         <!-- 文件列表 -->
         <div v-if="keystoreInfo?.files.length" class="file-list">
           <h4>文件清单</h4>
+          <div class="responsive-table">
           <table>
             <thead>
               <tr><th>文件名</th><th>大小</th></tr>
             </thead>
             <tbody>
               <tr v-for="f in keystoreInfo.files" :key="f.name">
-                <td><code>{{ f.name }}</code></td>
-                <td>{{ f.size_display }}</td>
+                <td data-label="文件名"><code>{{ f.name }}</code></td>
+                <td data-label="大小">{{ f.size_display }}</td>
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 
