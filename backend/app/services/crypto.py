@@ -265,6 +265,63 @@ def build_user_cert(
     return cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
 
+# ──────────────────────────────────────────────────────────────────
+# 密钥库文件管理
+# ──────────────────────────────────────────────────────────────────
+
+
+def _keystore_path(filename: str) -> str:
+    """返回密钥库文件的完整路径."""
+    from app.config import settings
+    return os.path.join(settings.keystore_dir, filename)
+
+
+def save_keystore_file(filename: str, content: str) -> str:
+    """将 PEM 内容保存为密钥库文件.
+
+    Args:
+        filename: 文件名（如 root_ca.key, cert_abc123.pem）
+        content: PEM 格式的密钥或证书内容
+
+    Returns:
+        保存的文件完整路径
+    """
+    filepath = _keystore_path(filename)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    return filepath
+
+
+def load_keystore_file(filename: str) -> str:
+    """从密钥库加载文件内容.
+
+    Raises:
+        FileNotFoundError: 文件不存在
+    """
+    filepath = _keystore_path(filename)
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def delete_keystore_file(filename: str) -> bool:
+    """删除密钥库文件，文件不存在时返回 False."""
+    filepath = _keystore_path(filename)
+    try:
+        os.remove(filepath)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def list_keystore_files() -> list[str]:
+    """列出密钥库目录中所有文件."""
+    from app.config import settings
+    try:
+        return sorted(os.listdir(settings.keystore_dir))
+    except FileNotFoundError:
+        return []
+
+
 def extract_cert_info(cert_pem: str) -> dict:
     """从 X.509 证书 PEM 中提取关键字段用于展示."""
     cert = x509.load_pem_x509_certificate(cert_pem.encode())

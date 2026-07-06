@@ -25,6 +25,7 @@ from app.services.crypto import (
     build_self_signed_root_cert,
     generate_serial_number,
     generate_sm2_keypair,
+    save_keystore_file,
 )
 
 router = APIRouter(prefix="/api/ca", tags=["CA"])
@@ -95,6 +96,10 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
     )
     db.add(root_cert)
     await db.flush()
+
+    # 将根证书和私钥保存为密钥库文件
+    save_keystore_file(f"root_{serial}.pem", cert_pem)
+    save_keystore_file(f"root_{serial}.key", private_pem)
 
     return CAInitResponse(
         success=True,
