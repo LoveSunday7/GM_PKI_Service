@@ -21,6 +21,7 @@ const form = ref({
 // 证书详情
 const selectedCert = ref<Record<string, unknown> | null>(null)
 const detailLoading = ref(false)
+const pemCopied = ref(false)
 
 onMounted(() => {
   caStore.fetchStatus()
@@ -55,6 +56,24 @@ async function showDetail(serial: string) {
 
 function closeDetail() {
   selectedCert.value = null
+}
+
+async function copyPEM(pem: string) {
+  try {
+    await navigator.clipboard.writeText(pem)
+    pemCopied.value = true
+    setTimeout(() => { pemCopied.value = false }, 2000)
+  } catch {
+    // fallback for older browsers
+    const ta = document.createElement('textarea')
+    ta.value = pem
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    pemCopied.value = true
+    setTimeout(() => { pemCopied.value = false }, 2000)
+  }
 }
 
 async function handleDownload(serial: string) {
@@ -195,7 +214,12 @@ async function handleDownload(serial: string) {
         <dt>密钥用途</dt>
         <dd>{{ selectedCert.key_usage || '—' }}</dd>
         <dt>证书 PEM</dt>
-        <dd><pre class="pem-preview">{{ (selectedCert.cert_pem as string)?.slice(0, 300) }}...</pre></dd>
+        <dd>
+          <pre class="pem-preview">{{ (selectedCert.cert_pem as string)?.slice(0, 300) }}...</pre>
+          <button class="btn-copy" @click="copyPEM(selectedCert.cert_pem as string)">
+            {{ pemCopied ? '✅ 已复制' : '📋 复制 PEM' }}
+          </button>
+        </dd>
       </dl>
     </section>
   </div>
@@ -351,5 +375,16 @@ code {
   word-break: break-all;
   max-height: 120px;
   overflow-y: auto;
+  margin-bottom: 0.4rem;
 }
+.btn-copy {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  background: transparent;
+  color: #0f3460;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
 </style>
