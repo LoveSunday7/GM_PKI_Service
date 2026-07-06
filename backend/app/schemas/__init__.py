@@ -24,6 +24,7 @@ from app.schemas.crl import (
     CRLRevokeResponse,
 )
 from app.schemas.common import ErrorResponse, SuccessResponse
+from app.schemas.system import SystemConfigResponse
 from app.schemas.ocsp import OCSPQueryRequest, OCSPQueryResponse
 from app.schemas.verify import (
     CertVerifyRequest,
@@ -40,6 +41,8 @@ __all__ = [
     # 通用
     "SuccessResponse",
     "ErrorResponse",
+    # 系统
+    "SystemConfigResponse",
     # CA
     "CAInitRequest",
     "CAInitResponse",
