@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -36,3 +37,14 @@ class CreateAdminUserResponse(BaseModel):
     message: str = Field(description="结果描述")
     username: str = Field(description="用户名")
     role: str = Field(description="角色")
+
+
+class AdminUserListItem(BaseModel):
+    """管理员用户列表项（不含密码哈希）."""
+
+    model_config = {"from_attributes": True}
+
+    id: str = Field(description="用户 UUID")
+    username: str = Field(description="用户名")
+    role: str = Field(description="角色")
+    created_at: datetime = Field(description="创建时间")

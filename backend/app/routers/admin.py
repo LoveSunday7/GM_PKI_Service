@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.admin_user import AdminUser
 from app.routers.auth import CurrentUser, get_current_user, hash_password
-from app.schemas.admin import CreateAdminUserRequest, CreateAdminUserResponse
+from app.schemas.admin import AdminUserListItem, CreateAdminUserRequest, CreateAdminUserResponse
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
 logger = logging.getLogger(__name__)
@@ -47,3 +47,15 @@ async def create_admin_user(
         username=payload.username,
         role=payload.role,
     )
+
+
+@router.get("/users", response_model=list[AdminUserListItem])
+async def list_admin_users(
+    db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+) -> list[AdminUserListItem]:
+    """查询管理员用户列表（需登录）."""
+    stmt = select(AdminUser).order_by(AdminUser.created_at.desc())
+    result = await db.execute(stmt)
+    users = result.scalars().all()
+    return [AdminUserListItem.model_validate(u) for u in users]
