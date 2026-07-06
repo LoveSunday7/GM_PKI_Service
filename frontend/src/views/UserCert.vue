@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useCertStore } from '@/stores/cert'
 import { useCAStore } from '@/stores/ca'
 import { certApi } from '@/api'
@@ -9,6 +9,21 @@ const caStore = useCAStore()
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+
+// ── 筛选 ───────────────────────────────────────────────────────
+const filterType = ref('')
+const filterStatus = ref('')
+
+const filteredCerts = computed(() => {
+  let certs = certStore.certs
+  if (filterType.value) {
+    certs = certs.filter((c: { cert_type: string }) => c.cert_type === filterType.value)
+  }
+  if (filterStatus.value) {
+    certs = certs.filter((c: { status: string }) => c.status === filterStatus.value)
+  }
+  return certs
+})
 
 const form = ref({
   user_name: '',
@@ -121,6 +136,28 @@ async function handleDownload(serial: string) {
     <!-- 证书列表 -->
     <section class="section">
       <h3>已签发证书</h3>
+
+      <!-- 筛选栏 -->
+      <div class="filter-bar" v-if="certStore.certs.length">
+        <label class="filter-label">
+          类型
+          <select v-model="filterType">
+            <option value="">全部</option>
+            <option value="sign">签名证书</option>
+            <option value="encrypt">加密证书</option>
+          </select>
+        </label>
+        <label class="filter-label">
+          状态
+          <select v-model="filterStatus">
+            <option value="">全部</option>
+            <option value="active">有效</option>
+            <option value="revoked">已撤销</option>
+          </select>
+        </label>
+        <span class="filter-count">{{ filteredCerts.length }} / {{ certStore.certs.length }} 张</span>
+      </div>
+
       <table v-if="certStore.certs.length">
         <thead>
           <tr>
@@ -135,7 +172,7 @@ async function handleDownload(serial: string) {
         </thead>
         <tbody>
           <tr
-            v-for="c in certStore.certs"
+            v-for="c in filteredCerts"
             :key="c.id"
             @click="showDetail(c.serial_number)"
             class="clickable-row"
@@ -213,6 +250,34 @@ label { display: flex; flex-direction: column; font-size: 0.85rem; color: #555; 
 input, select, textarea { padding: 0.5rem 0.75rem; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 0.9rem; }
 textarea { resize: vertical; font-family: monospace; }
 .form-actions { grid-column: 1 / -1; }
+
+/* 筛选栏 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.filter-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: #666;
+}
+.filter-label select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: #fff;
+}
+.filter-count {
+  font-size: 0.8rem;
+  color: #999;
+  margin-left: auto;
+}
 button { padding: 0.6rem 1.5rem; background: #1a1a2e; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #555; }
