@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import Base, check_db, engine
+from app.database import check_db, engine
 from app.exceptions import register_exception_handlers
 from app.logging_config import setup_logging
 from app.routers import auth, ca, crl, user_cert
@@ -45,12 +45,27 @@ def _ensure_keystore() -> None:
     logger.info("密钥库目录就绪: %s", keystore)
 
 
+async def _run_migrations() -> None:
+    """使用 Alembic 运行数据库迁移（替代 create_all）."""
+    import asyncio
+
+    from alembic import command
+    from alembic.config import Config
+
+    alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+
+    # alembic command.upgrade 是同步调用，内部 env.py 通过 asyncio.run() 执行异步迁移.
+    # 在已有事件循环中需通过线程池隔离，避免 "cannot be called from a running event loop" 错误.
+    await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+    logger.info("数据库迁移完成")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时创建数据库表 + 密钥库目录，关闭时释放引擎."""
+    """启动时运行数据库迁移 + 创建密钥库目录，关闭时释放引擎."""
     _ensure_keystore()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await _run_migrations()
     yield
     await engine.dispose()
 
