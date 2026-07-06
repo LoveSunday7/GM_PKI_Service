@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useCRLStore } from '@/stores/crl'
 import { useCAStore } from '@/stores/ca'
 import { useCertStore } from '@/stores/cert'
@@ -12,6 +12,33 @@ const certStore = useCertStore()
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+
+// ── 序列号自动补全 ─────────────────────────────────────────────
+const showSuggestions = ref(false)
+
+const serialSuggestions = computed(() => {
+  const q = revokeForm.value.cert_serial_number.trim().toLowerCase()
+  if (!q) return []
+  return certStore.certs
+    .filter((c: { serial_number: string; status: string }) =>
+      c.serial_number.toLowerCase().includes(q) && c.status === 'active'
+    )
+    .slice(0, 8)
+})
+
+function selectSuggestion(serial: string) {
+  revokeForm.value.cert_serial_number = serial
+  showSuggestions.value = false
+}
+
+function onSerialFocus() {
+  showSuggestions.value = true
+}
+
+function onSerialBlur() {
+  // 延迟隐藏以允许点击建议项
+  setTimeout(() => { showSuggestions.value = false }, 150)
+}
 
 const reasonLabels: Record<string, string> = {
   unspecified: '未指定',
@@ -81,9 +108,28 @@ async function handleDownload() {
     <section class="section" v-if="caStore.initialized">
       <h3>撤销证书</h3>
       <form @submit.prevent="handleRevoke" class="form-row">
-        <label>
+        <label class="autocomplete-wrapper">
           证书序列号
-          <input v-model="revokeForm.cert_serial_number" required placeholder="输入证书序列号..." />
+          <input
+            v-model="revokeForm.cert_serial_number"
+            required
+            placeholder="输入证书序列号搜索..."
+            autocomplete="off"
+            @focus="onSerialFocus"
+            @blur="onSerialBlur"
+            @input="showSuggestions = true"
+          />
+          <ul v-if="showSuggestions && serialSuggestions.length" class="suggestions">
+            <li
+              v-for="c in serialSuggestions"
+              :key="c.serial_number"
+              @mousedown.prevent="selectSuggestion(c.serial_number)"
+            >
+              <code>{{ (c as { serial_number: string }).serial_number?.slice(0, 20) }}...</code>
+              <span class="sug-user">{{ (c as { user_name: string }).user_name }}</span>
+              <span class="sug-type">{{ (c as { cert_type: string }).cert_type }}</span>
+            </li>
+          </ul>
         </label>
         <label>
           撤销原因
@@ -252,4 +298,36 @@ code {
 .empty { color: #888; font-style: italic; }
 .crl-actions { margin-top: 0.75rem; }
 .btn-sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; background: #555; }
+
+/* 自动补全 */
+.autocomplete-wrapper { position: relative; }
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 100;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0.25rem 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.suggestions li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.1s;
+}
+.suggestions li:hover { background: #f0f4f8; }
+.suggestions li code { font-size: 0.72rem; }
+.sug-user { color: #555; flex-shrink: 0; }
+.sug-type { color: #999; font-size: 0.7rem; margin-left: auto; }
 </style>
