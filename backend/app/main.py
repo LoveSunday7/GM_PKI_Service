@@ -19,7 +19,7 @@ from app.config import settings
 from app.database import check_db, engine
 from app.exceptions import register_exception_handlers
 from app.logging_config import setup_logging
-from app.routers import auth, ca, crl, ocsp, system, user_cert
+from app.routers import admin, auth, ca, crl, ocsp, system, user_cert
 
 # ── 初始化日志系统 ─────────────────────────────────────────────────
 setup_logging()
@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
 # ── OpenAPI 标签元数据 ─────────────────────────────────────────────
 _tags_metadata = [
     {"name": "认证", "description": "管理员登录、登出、Token 管理"},
+    {"name": "管理员", "description": "管理员用户创建、查询、删除、密码管理"},
     {"name": "CA", "description": "根证书签发、查询、下载"},
     {"name": "用户证书", "description": "用户证书签发、查询、撤销状态"},
     {"name": "CRL", "description": "证书撤销、CRL 生成、查询、下载"},
@@ -127,6 +128,7 @@ async def log_requests(request, call_next):
 
 # ── 路由注册 ─────────────────────────────────────────────────────
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(ca.router)
 app.include_router(user_cert.router)
 app.include_router(crl.router)
