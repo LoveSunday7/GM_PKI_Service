@@ -40,6 +40,7 @@ const form = ref({
 // 详情面板
 const selectedCert = ref<Record<string, unknown> | null>(null)
 const detailLoading = ref(false)
+const copiedField = ref('')
 // 状态查询结果
 const certStatus = ref<{ status?: string; revoked_at?: string; reason?: string } | null>(null)
 
@@ -93,6 +94,21 @@ async function handleDownload(serial: string) {
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : '下载失败'
   }
+}
+
+async function copyText(text: string, field: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  copiedField.value = field
+  setTimeout(() => { copiedField.value = '' }, 2000)
 }
 </script>
 
@@ -230,7 +246,21 @@ async function handleDownload(serial: string) {
           <dt>生效时间</dt><dd>{{ selectedCert.not_before }}</dd>
           <dt>到期时间</dt><dd>{{ selectedCert.not_after }}</dd>
           <dt>密钥长度</dt><dd>{{ selectedCert.key_size }} bit</dd>
-          <dt>证书 PEM</dt><dd><pre class="pem-preview">{{ (selectedCert.cert_pem as string)?.slice(0, 300) }}...</pre></dd>
+          <dt>证书 PEM</dt>
+          <dd>
+            <pre class="pem-preview">{{ (selectedCert.cert_pem as string)?.slice(0, 300) }}...</pre>
+            <button class="btn-copy" @click="copyText(selectedCert.cert_pem as string, 'cert')">
+              {{ copiedField === 'cert' ? '✅ 已复制' : '📋 复制 PEM' }}
+            </button>
+          </dd>
+          <dt>公钥 PEM</dt>
+          <dd v-if="selectedCert.public_key_pem">
+            <pre class="pem-preview">{{ (selectedCert.public_key_pem as string)?.slice(0, 300) }}...</pre>
+            <button class="btn-copy" @click="copyText(selectedCert.public_key_pem as string, 'pub')">
+              {{ copiedField === 'pub' ? '✅ 已复制' : '📋 复制公钥' }}
+            </button>
+          </dd>
+          <dd v-else>—</dd>
         </dl>
       </template>
     </section>
@@ -308,5 +338,7 @@ code { font-size: 0.8rem; background: #f0f0f0; padding: 0.15rem 0.35rem; border-
 .detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 0.35rem 1rem; font-size: 0.85rem; }
 .detail-grid dt { color: #666; font-weight: 600; }
 .detail-grid dd { word-break: break-all; }
-.pem-preview { background: #f8f8f8; padding: 0.5rem; border-radius: 6px; font-size: 0.72rem; font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto; }
+.pem-preview { background: #f8f8f8; padding: 0.5rem; border-radius: 6px; font-size: 0.72rem; font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto; margin-bottom: 0.4rem; }
+.btn-copy { padding: 0.3rem 0.7rem; font-size: 0.78rem; background: transparent; color: #0f3460; border: 1px solid #0f3460; border-radius: 6px; cursor: pointer; }
+.btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
 </style>
