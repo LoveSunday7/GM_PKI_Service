@@ -6,6 +6,7 @@ import logging
 import os
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -262,4 +263,22 @@ async def get_logs(
         requested_lines=lines,
         level_filter=level.upper() if level else None,
         lines=recent,
+    )
+
+
+@router.get("/logs/download")
+async def download_logs(
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """下载完整日志文件（需登录）."""
+    log_path = os.path.join(settings.log_dir, settings.log_file)
+
+    if not os.path.isfile(log_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="日志文件不存在")
+
+    return FileResponse(
+        path=log_path,
+        filename=settings.log_file,
+        media_type="text/plain; charset=utf-8",
     )
