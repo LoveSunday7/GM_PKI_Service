@@ -14,12 +14,19 @@ from app.schemas.ca import (
     RootCertRevokeResponse,
 )
 from app.schemas.cert import (
+    CertApplicationItem,
+    CertApplicationListResponse,
+    CertApplyRequest,
+    CertApplyResponse,
+    CertApproveRequest,
     CertDetailResponse,
     CertDownloadResponse,
     CertIssueRequest,
     CertIssueResponse,
     CertListItem,
     CertListResponse,
+    CertRejectRequest,
+    CertReviewResponse,
     CertStatusResponse,
 )
 from app.schemas.crl import (
@@ -96,6 +103,13 @@ __all__ = [
     "CertDetailResponse",
     "CertDownloadResponse",
     "CertStatusResponse",
+    "CertApplyRequest",
+    "CertApplyResponse",
+    "CertApplicationItem",
+    "CertApplicationListResponse",
+    "CertApproveRequest",
+    "CertRejectRequest",
+    "CertReviewResponse",
     # CRL
     "CRLRevokeRequest",
     "CRLRevokeResponse",

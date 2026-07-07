@@ -15,6 +15,8 @@ const navItems = [
   { to: '/', label: '仪表盘', icon: '📊' },
   { to: '/ca', label: '根 CA', icon: '🔐' },
   { to: '/cert', label: '用户证书', icon: '📜' },
+  { to: '/cert-apply', label: '证书申请', icon: '📝' },
+  { to: '/cert-audit', label: '证书审核', icon: '🔍' },
   { to: '/crl', label: 'CRL', icon: '🚫' },
   { to: '/verify', label: '证书验证', icon: '🔍' },
   { to: '/ocsp', label: 'OCSP', icon: '🟢' },

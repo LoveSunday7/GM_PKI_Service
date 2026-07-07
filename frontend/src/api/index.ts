@@ -249,6 +249,25 @@ export const certApi = {
 
   activity: () =>
     request<{ activities: Array<{ type: string; time: string; user: string; serial: string; detail: string }> }>('/cert/activity'),
+
+  // RA 审核工作流
+  apply: (data: { user_name: string; email?: string; organization?: string; department?: string; province?: string; city?: string; cert_type: string; validity_days: number; public_key_pem?: string }) =>
+    request<{ success: boolean; message: string; application_id: string }>('/cert/apply', { method: 'POST', body: JSON.stringify(data) }),
+
+  applications: (params?: { status?: string; page?: number; page_size?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.status) qs.set('status', params.status)
+    if (params?.page) qs.set('page', String(params.page))
+    if (params?.page_size) qs.set('page_size', String(params.page_size))
+    const q = qs.toString()
+    return request<{ items: Array<{ id: string; user_name: string; email?: string; organization?: string; department?: string; cert_type: string; validity_days: number; status: string; reject_reason?: string; applied_by: string; reviewed_by?: string; issued_cert_serial?: string; created_at: string }>; total: number; page: number; page_size: number }>(`/cert/applications${q ? `?${q}` : ''}`)
+  },
+
+  approve: (id: string) =>
+    request<{ success: boolean; message: string; application_id: string; issued_cert_serial?: string }>(`/cert/applications/${id}/approve`, { method: 'POST', body: '{}' }),
+
+  reject: (id: string, reason: string) =>
+    request<{ success: boolean; message: string; application_id: string }>(`/cert/applications/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -1,8 +1,8 @@
-"""用户证书管理接口 — 签发、列表、详情、下载、状态查询."""
+"""用户证书管理接口 — 签发、列表、详情、下载、状态查询、证书申请审核."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func as sqlfunc
@@ -10,17 +10,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.ca_config import CAConfig
+from app.models.cert_application import CertApplication
 from app.models.crl import CRLRevocation
 from app.models.root_cert import RootCert
 from app.models.user_cert import UserCert
 from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.cert import (
+    CertApplicationItem,
+    CertApplicationListResponse,
+    CertApplyRequest,
+    CertApplyResponse,
+    CertApproveRequest,
     CertDetailResponse,
     CertDownloadResponse,
     CertIssueRequest,
     CertIssueResponse,
     CertListItem,
     CertListResponse,
+    CertRejectRequest,
+    CertReviewResponse,
     CertStatusResponse,
 )
 from app.schemas.verify import (
@@ -317,3 +325,181 @@ async def verify_certificate(payload: CertVerifyRequest, _user: CurrentUser = De
 async def verify_certificate_revocation(payload: CRLVerifyRequest, _user: CurrentUser = Depends(get_current_user)):
     """CRL 撤销验证 — 传入证书 PEM + CRL PEM，验证是否已撤销."""
     return verify_cert_against_crl(payload.cert_pem, payload.crl_pem)
+
+
+# ── 证书申请审核工作流 (RA) ─────────────────────────────────────
+
+
+@router.post("/apply", response_model=CertApplyResponse)
+async def apply_cert(
+    payload: CertApplyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CertApplyResponse:
+    """B002: 提交证书申请 — 进入待审核池."""
+    app = CertApplication(
+        user_name=payload.user_name,
+        email=payload.email,
+        organization=payload.organization,
+        department=payload.department,
+        province=payload.province,
+        city=payload.city,
+        cert_type=payload.cert_type,
+        validity_days=payload.validity_days,
+        public_key_pem=payload.public_key_pem,
+        status="pending",
+        applied_by=current_user.username,
+    )
+    db.add(app)
+    await db.flush()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("证书申请: %s 提交了 %s 证书申请 (id=%s)", current_user.username, payload.cert_type, app.id)
+
+    return CertApplyResponse(
+        success=True,
+        message="证书申请已提交，等待管理员审核",
+        application_id=app.id,
+    )
+
+
+@router.get("/applications", response_model=CertApplicationListResponse)
+async def list_applications(
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+) -> CertApplicationListResponse:
+    """B003: 管理员查看申请列表（支持按状态过滤，分页）."""
+    base_stmt = select(CertApplication)
+    if status:
+        base_stmt = base_stmt.where(CertApplication.status == status)
+
+    count_stmt = select(sqlfunc.count()).select_from(base_stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    offset = (page - 1) * page_size
+    stmt = base_stmt.order_by(CertApplication.created_at.desc()).offset(offset).limit(page_size)
+    result = await db.execute(stmt)
+    items = [CertApplicationItem.model_validate(a) for a in result.scalars().all()]
+
+    return CertApplicationListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/applications/{app_id}/approve", response_model=CertReviewResponse)
+async def approve_application(
+    app_id: str,
+    payload: CertApproveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CertReviewResponse:
+    """B004: 管理员审核通过 — 自动触发证书签发."""
+    stmt = select(CertApplication).where(CertApplication.id == app_id)
+    result = await db.execute(stmt)
+    app = result.scalars().first()
+    if app is None:
+        raise HTTPException(status_code=404, detail="申请未找到")
+    if app.status != "pending":
+        raise HTTPException(status_code=409, detail=f"申请已被{app.status}，无法重复审核")
+
+    # 自动签发证书
+    root_cert = await _get_active_root_cert(db)
+
+    if app.public_key_pem:
+        public_pem = app.public_key_pem
+        private_pem = None
+    else:
+        public_pem, private_pem, _ = generate_sm2_keypair()
+
+    serial = generate_serial_number()
+    subject_dn = build_dn(
+        common_name=app.user_name,
+        organization=app.organization or "Default Org",
+        country="CN",
+        province=app.province,
+        city=app.city,
+    )
+
+    cert_pem = build_user_cert(
+        subject_dn=subject_dn,
+        public_key_pem=public_pem,
+        issuer_cert_pem=root_cert.cert_pem,
+        issuer_key_pem=root_cert.key_pem,
+        cert_type=app.cert_type,
+        validity_days=app.validity_days,
+        serial_number=serial,
+        signature_algorithm=root_cert.signature_algorithm,
+    )
+
+    now = datetime.now(timezone.utc)
+    user_cert = UserCert(
+        serial_number=serial,
+        cert_type=app.cert_type,
+        subject_dn=subject_dn,
+        issuer_dn=root_cert.subject_dn,
+        root_cert_serial=root_cert.serial_number,
+        user_name=app.user_name,
+        email=app.email,
+        organization=app.organization,
+        department=app.department,
+        province=app.province,
+        city=app.city,
+        signature_algorithm=root_cert.signature_algorithm,
+        not_before=now,
+        not_after=now + timedelta(days=app.validity_days),
+        cert_pem=cert_pem,
+        key_pem=private_pem,
+        public_key_pem=public_pem,
+        status="active",
+    )
+    db.add(user_cert)
+
+    app.status = "approved"
+    app.reviewed_by = current_user.username
+    app.issued_cert_serial = serial
+    await db.flush()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("管理员 %s 批准了 %s 的证书申请 (serial=%s)", current_user.username, app.user_name, serial)
+
+    return CertReviewResponse(
+        success=True,
+        message=f"申请已通过，证书已签发（序列号: {serial[:16]}...）",
+        application_id=app_id,
+        issued_cert_serial=serial,
+    )
+
+
+@router.post("/applications/{app_id}/reject", response_model=CertReviewResponse)
+async def reject_application(
+    app_id: str,
+    payload: CertRejectRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CertReviewResponse:
+    """B005: 管理员拒绝申请."""
+    stmt = select(CertApplication).where(CertApplication.id == app_id)
+    result = await db.execute(stmt)
+    app = result.scalars().first()
+    if app is None:
+        raise HTTPException(status_code=404, detail="申请未找到")
+    if app.status != "pending":
+        raise HTTPException(status_code=409, detail=f"申请已被{app.status}，无法重复审核")
+
+    app.status = "rejected"
+    app.reject_reason = payload.reason
+    app.reviewed_by = current_user.username
+    await db.flush()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("管理员 %s 拒绝了 %s 的证书申请（原因: %s）", current_user.username, app.user_name, payload.reason)
+
+    return CertReviewResponse(
+        success=True,
+        message=f"申请已拒绝（原因: {payload.reason}）",
+        application_id=app_id,
+    )

@@ -108,3 +108,77 @@ class CertStatusResponse(BaseModel):
     status: str = Field(description="证书状态（active/revoked）")
     revoked_at: datetime | None = Field(default=None, description="撤销时间")
     reason: str | None = Field(default=None, description="撤销原因")
+
+
+# ── 证书申请（RA 审核工作流）──────────────────────────────
+
+class CertApplyRequest(BaseModel):
+    """证书申请请求体."""
+
+    user_name: str = Field(min_length=1, max_length=128, description="用户姓名")
+    email: str | None = Field(default=None, max_length=255, description="邮箱")
+    organization: str | None = Field(default=None, max_length=255, description="组织")
+    department: str | None = Field(default=None, max_length=255, description="部门")
+    province: str | None = Field(default=None, max_length=128, description="省份")
+    city: str | None = Field(default=None, max_length=128, description="城市")
+    cert_type: str = Field(default="sign", pattern="^(sign|encrypt)$", description="证书类型")
+    validity_days: int = Field(default=365, ge=1, le=36500, description="有效期（天）")
+    public_key_pem: str | None = Field(default=None, description="可选：PEM 格式公钥")
+
+
+class CertApplyResponse(BaseModel):
+    """证书申请响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    application_id: str = Field(description="申请记录 UUID")
+
+
+class CertApplicationItem(BaseModel):
+    """证书申请列表项."""
+
+    model_config = {"from_attributes": True}
+
+    id: str = Field(description="申请 UUID")
+    user_name: str = Field(description="用户名")
+    email: str | None = Field(default=None)
+    organization: str | None = Field(default=None)
+    department: str | None = Field(default=None)
+    cert_type: str = Field(description="证书类型")
+    validity_days: int = Field(description="有效期")
+    status: str = Field(description="状态（pending/approved/rejected）")
+    reject_reason: str | None = Field(default=None, description="拒绝原因")
+    applied_by: str = Field(description="提交人")
+    reviewed_by: str | None = Field(default=None, description="审核人")
+    issued_cert_serial: str | None = Field(default=None, description="签发的证书序列号")
+    created_at: datetime = Field(description="提交时间")
+
+
+class CertApplicationListResponse(BaseModel):
+    """证书申请分页列表."""
+
+    items: list[CertApplicationItem] = Field(description="申请列表")
+    total: int = Field(description="总数")
+    page: int = Field(description="页码")
+    page_size: int = Field(description="每页大小")
+
+
+class CertApproveRequest(BaseModel):
+    """审核通过请求."""
+
+    pass  # 无需额外字段
+
+
+class CertRejectRequest(BaseModel):
+    """审核拒绝请求."""
+
+    reason: str = Field(min_length=1, max_length=512, description="拒绝原因")
+
+
+class CertReviewResponse(BaseModel):
+    """审核操作响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    application_id: str = Field(description="申请 UUID")
+    issued_cert_serial: str | None = Field(default=None, description="签发的证书序列号（通过时）")
