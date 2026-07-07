@@ -76,19 +76,35 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
     cert_path = save_keystore_file(f"root_{serial}.pem", cert_pem)
     key_path = save_keystore_file(f"root_{serial}.key", private_pem)
 
-    # 持久化 CA 配置 — 存储实际文件路径
-    ca_config = CAConfig(
-        ca_name=payload.ca_name,
-        organization=payload.organization,
-        country=payload.country,
-        province=payload.province,
-        city=payload.city,
-        keystore_path=cert_path + "\n" + key_path,
-        signature_algorithm=payload.signature_algorithm,
-        validity_days=payload.validity_days,
-        is_initialized=True,
-    )
-    db.add(ca_config)
+    # 持久化 CA 配置 — 更新已有记录或创建新记录
+    ca_config_stmt = select(CAConfig).order_by(CAConfig.created_at.desc()).limit(1)
+    ca_result = await db.execute(ca_config_stmt)
+    ca_config = ca_result.scalars().first()
+
+    if ca_config and not ca_config.is_initialized:
+        # 复用系统设置中已配置的 CA 信息
+        ca_config.ca_name = payload.ca_name
+        ca_config.organization = payload.organization
+        ca_config.country = payload.country
+        ca_config.province = payload.province
+        ca_config.city = payload.city
+        ca_config.keystore_path = cert_path + "\n" + key_path
+        ca_config.signature_algorithm = payload.signature_algorithm
+        ca_config.validity_days = payload.validity_days
+        ca_config.is_initialized = True
+    else:
+        ca_config = CAConfig(
+            ca_name=payload.ca_name,
+            organization=payload.organization,
+            country=payload.country,
+            province=payload.province,
+            city=payload.city,
+            keystore_path=cert_path + "\n" + key_path,
+            signature_algorithm=payload.signature_algorithm,
+            validity_days=payload.validity_days,
+            is_initialized=True,
+        )
+        db.add(ca_config)
 
     # 持久化根证书记录
     root_cert = RootCert(

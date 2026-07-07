@@ -59,15 +59,8 @@ async def get_system_config(
     _user: CurrentUser = Depends(get_current_user),
 ) -> SystemConfigResponse:
     """返回当前系统配置信息（需登录）."""
-    # 从数据库读取 CA 名称和组织信息（若已初始化）
-    ca_name = "GM-PKI-CA"
-    organization = "Default Org"
-    stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
-    result = await db.execute(stmt)
-    ca_config = result.scalars().first()
-    if ca_config:
-        ca_name = ca_config.ca_name
-        organization = ca_config.organization
+    # 从 DB 读取 CA 配置（使用与 PUT 相同的查询逻辑）
+    ca_config = await _get_or_create_ca_config(db)
 
     return SystemConfigResponse(
         app_name=settings.app_name,
@@ -75,8 +68,8 @@ async def get_system_config(
         database_type=_detect_database_type(settings.database_url),
         keystore_dir=settings.keystore_dir,
         log_level=settings.log_level,
-        ca_name=ca_name,
-        organization=organization,
+        ca_name=ca_config.ca_name,
+        organization=ca_config.organization,
         ca_default_validity_days=settings.ca_default_validity_days,
         cert_default_validity_days=settings.cert_default_validity_days,
         crl_validity_hours=settings.crl_validity_hours,
@@ -155,18 +148,29 @@ async def get_keystore_info(
 
 
 async def _get_or_create_ca_config(db: AsyncSession) -> CAConfig:
-    """获取当前 CA 配置，若不存在则创建默认记录."""
-    stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
+    """获取当前 CA 配置（优先已初始化的，否则返回最近记录或创建默认）."""
+    # 1. 优先返回已初始化的配置
+    stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True)).order_by(CAConfig.created_at.desc())
     result = await db.execute(stmt)
     ca_config = result.scalars().first()
-    if ca_config is None:
-        ca_config = CAConfig(
-            ca_name="GM-PKI-CA",
-            organization="Default Org",
-            is_initialized=False,
-        )
-        db.add(ca_config)
-        await db.flush()
+    if ca_config:
+        return ca_config
+
+    # 2. 返回最近创建的记录（包括未初始化的）
+    stmt = select(CAConfig).order_by(CAConfig.created_at.desc()).limit(1)
+    result = await db.execute(stmt)
+    ca_config = result.scalars().first()
+    if ca_config:
+        return ca_config
+
+    # 3. 都不存在则创建默认
+    ca_config = CAConfig(
+        ca_name="GM-PKI-CA",
+        organization="Default Org",
+        is_initialized=False,
+    )
+    db.add(ca_config)
+    await db.flush()
     return ca_config
 
 
