@@ -379,6 +379,54 @@ async def download_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = 
     return CRLDownloadResponse(crl_pem=crl.crl_pem, filename=f"crl_{crl.crl_number}.crl")
 
 
+# ── C004: 公开 CRL 端点（无需认证，供 CRL 分发点使用）─────────
+
+@router.get("/public/current", response_model=CRLQueryResponse | dict)
+async def get_current_crl_public(db: AsyncSession = Depends(get_db)):
+    """公开查询当前 CRL — 无需认证（C004）."""
+    stmt = select(CRLPublish).order_by(CRLPublish.crl_number.desc()).limit(1)
+    result = await db.execute(stmt)
+    crl = result.scalars().first()
+    if crl is None:
+        return {"message": "暂无 CRL 发布记录", "crl_number": 0, "revoked_count": 0}
+
+    rev_stmt = select(CRLRevocation).order_by(CRLRevocation.revoked_at.desc())
+    rev_result = await db.execute(rev_stmt)
+    revs = rev_result.scalars().all()
+
+    revoked_list = [
+        {
+            "cert_serial_number": r.cert_serial_number,
+            "reason": r.reason,
+            "revoked_at": r.revoked_at.isoformat() if r.revoked_at else None,
+        }
+        for r in revs
+    ]
+
+    return CRLQueryResponse(
+        crl_number=crl.crl_number,
+        issuer_dn=crl.issuer_dn,
+        this_update=crl.this_update,
+        next_update=crl.next_update,
+        signature_algorithm=crl.signature_algorithm,
+        revoked_count=crl.revoked_count,
+        crl_pem=crl.crl_pem,
+        revoked_certificates=revoked_list,
+        created_at=crl.created_at,
+    )
+
+
+@router.get("/public/download", response_model=CRLDownloadResponse)
+async def download_crl_public(db: AsyncSession = Depends(get_db)):
+    """公开下载 CRL — 无需认证（C004）."""
+    stmt = select(CRLPublish).order_by(CRLPublish.crl_number.desc()).limit(1)
+    result = await db.execute(stmt)
+    crl = result.scalars().first()
+    if crl is None:
+        raise HTTPException(status_code=404, detail="暂无 CRL 发布记录")
+    return CRLDownloadResponse(crl_pem=crl.crl_pem, filename=f"crl_{crl.crl_number}.crl")
+
+
 @router.get("/history", response_model=CRLHistoryResponse)
 async def get_crl_history(
     page: int = 1,
