@@ -19,6 +19,7 @@ const form = ref({
   city: '',
   signature_algorithm: 'SM3WITHSM2',
   validity_days: 3650,
+  key_size: 256,
 })
 
 // 证书详情
@@ -137,6 +138,10 @@ async function handleDownload(serial: string) {
         <label>
           有效期（天）
           <input v-model.number="form.validity_days" type="number" min="1" max="36500" />
+        </label>
+        <label>
+          密钥长度（bit）
+          <input v-model.number="form.key_size" type="number" min="256" max="512" step="32" />
         </label>
         <div class="form-actions">
           <button type="submit" :disabled="loading">

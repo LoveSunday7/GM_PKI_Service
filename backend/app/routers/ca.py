@@ -72,14 +72,18 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
 
     now = datetime.now(timezone.utc)
 
-    # 持久化 CA 配置
+    # 将根证书和私钥保存为密钥库文件
+    cert_path = save_keystore_file(f"root_{serial}.pem", cert_pem)
+    key_path = save_keystore_file(f"root_{serial}.key", private_pem)
+
+    # 持久化 CA 配置 — 存储实际文件路径
     ca_config = CAConfig(
         ca_name=payload.ca_name,
         organization=payload.organization,
         country=payload.country,
         province=payload.province,
         city=payload.city,
-        keystore_path=settings.keystore_dir,
+        keystore_path=cert_path + "\n" + key_path,
         signature_algorithm=payload.signature_algorithm,
         validity_days=payload.validity_days,
         is_initialized=True,
@@ -101,10 +105,6 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
     )
     db.add(root_cert)
     await db.flush()
-
-    # 将根证书和私钥保存为密钥库文件
-    save_keystore_file(f"root_{serial}.pem", cert_pem)
-    save_keystore_file(f"root_{serial}.key", private_pem)
 
     return CAInitResponse(
         success=True,
@@ -268,8 +268,15 @@ async def renew_root_cert(
     db.add(new_root)
     await db.flush()
 
-    save_keystore_file(f"root_{new_serial}.pem", new_cert_pem)
-    save_keystore_file(f"root_{new_serial}.key", old_cert.key_pem)
+    cert_path = save_keystore_file(f"root_{new_serial}.pem", new_cert_pem)
+    key_path = save_keystore_file(f"root_{new_serial}.key", old_cert.key_pem)
+
+    # 更新 CA 配置中的密钥库路径
+    ca_stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
+    ca_result = await db.execute(ca_stmt)
+    ca_config = ca_result.scalars().first()
+    if ca_config:
+        ca_config.keystore_path = cert_path + "\n" + key_path
 
     import logging
     logger = logging.getLogger(__name__)
