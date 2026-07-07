@@ -8,6 +8,10 @@ from app.schemas.ca import (
     CAStatusResponse,
     RootCertDetailResponse,
     RootCertListItem,
+    RootCertRenewRequest,
+    RootCertRenewResponse,
+    RootCertRevokeRequest,
+    RootCertRevokeResponse,
 )
 from app.schemas.cert import (
     CertDetailResponse,
@@ -80,6 +84,10 @@ __all__ = [
     "CAStatusResponse",
     "RootCertListItem",
     "RootCertDetailResponse",
+    "RootCertRevokeRequest",
+    "RootCertRevokeResponse",
+    "RootCertRenewRequest",
+    "RootCertRenewResponse",
     # 证书
     "CertIssueRequest",
     "CertIssueResponse",

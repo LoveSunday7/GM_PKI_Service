@@ -101,3 +101,43 @@ class RootCertDetailResponse(BaseModel):
     key_usage: str | None = Field(default=None, description="密钥用途")
     status: str = Field(description="证书状态（active/revoked）")
     created_at: datetime = Field(description="创建时间")
+
+
+class RootCertRevokeRequest(BaseModel):
+    """根证书撤销请求."""
+
+    reason: str = Field(
+        default="unspecified",
+        max_length=128,
+        description="撤销原因：unspecified / keyCompromise / superseded / cessationOfOperation",
+    )
+
+
+class RootCertRevokeResponse(BaseModel):
+    """根证书撤销响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    serial_number: str = Field(description="被撤销的根证书序列号")
+
+
+class RootCertRenewRequest(BaseModel):
+    """根证书续期请求."""
+
+    validity_days: int = Field(
+        default=3650,
+        ge=1,
+        le=36500,
+        description="新证书有效期（天）",
+    )
+
+
+class RootCertRenewResponse(BaseModel):
+    """根证书续期响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    old_serial_number: str = Field(description="旧根证书序列号")
+    new_serial_number: str = Field(description="新根证书序列号")
+    subject_dn: str = Field(description="主题 DN")
+    cert_pem: str = Field(description="新根证书 PEM")

@@ -1,8 +1,8 @@
-"""根 CA 管理接口 — 初始化、查询、下载."""
+"""根 CA 管理接口 — 初始化、查询、下载、撤销、续期."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -18,6 +18,10 @@ from app.schemas.ca import (
     CAStatusResponse,
     RootCertDetailResponse,
     RootCertListItem,
+    RootCertRenewRequest,
+    RootCertRenewResponse,
+    RootCertRevokeRequest,
+    RootCertRevokeResponse,
 )
 from app.routers.auth import CurrentUser, get_current_user
 from app.services.crypto import (
@@ -89,7 +93,7 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
         issuer_dn=subject_dn,
         signature_algorithm=payload.signature_algorithm,
         not_before=now,
-        not_after=now.replace(year=now.year + payload.validity_days // 365),
+        not_after=now + timedelta(days=payload.validity_days),
         cert_pem=cert_pem,
         key_pem=private_pem,
         key_size=payload.key_size,
@@ -163,4 +167,119 @@ async def ca_status(db: AsyncSession = Depends(get_db), _user: CurrentUser = Dep
         ca_name=config.ca_name,
         organization=config.organization,
         signature_algorithm=config.signature_algorithm,
+    )
+
+
+@router.post("/root-cert/{serial_number}/revoke", response_model=RootCertRevokeResponse)
+async def revoke_root_cert(
+    serial_number: str,
+    payload: RootCertRevokeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> RootCertRevokeResponse:
+    """撤销根证书（A004）.
+
+    将指定根证书状态标记为 revoked。禁止撤销所有活跃根证书。
+    """
+    stmt = select(RootCert).where(RootCert.serial_number == serial_number)
+    result = await db.execute(stmt)
+    cert = result.scalars().first()
+    if cert is None:
+        raise HTTPException(status_code=404, detail="根证书未找到")
+    if cert.status == "revoked":
+        raise HTTPException(status_code=409, detail="根证书已被撤销")
+
+    # 检查是否是唯一的活跃根证书
+    active_stmt = select(RootCert).where(RootCert.status == "active")
+    active_result = await db.execute(active_stmt)
+    active_certs = active_result.scalars().all()
+    if len(active_certs) == 1 and active_certs[0].serial_number == serial_number:
+        raise HTTPException(status_code=400, detail="无法撤销唯一的活跃根证书，请先生成新的根证书")
+
+    cert.status = "revoked"
+    await db.flush()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning("管理员 %s 撤销了根证书 %s（原因: %s）", current_user.username, serial_number, payload.reason)
+
+    return RootCertRevokeResponse(
+        success=True,
+        message=f"根证书 {serial_number} 已撤销（原因: {payload.reason}）",
+        serial_number=serial_number,
+    )
+
+
+@router.post("/root-cert/{serial_number}/renew", response_model=RootCertRenewResponse)
+async def renew_root_cert(
+    serial_number: str,
+    payload: RootCertRenewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> RootCertRenewResponse:
+    """续期根证书（A005）.
+
+    使用现有根证书的密钥对签发一张新的根证书（相同 DN、相同密钥、新的有效期）。
+    旧证书保持 active 状态，后续可手动撤销。
+    """
+    stmt = select(RootCert).where(RootCert.serial_number == serial_number)
+    result = await db.execute(stmt)
+    old_cert = result.scalars().first()
+    if old_cert is None:
+        raise HTTPException(status_code=404, detail="根证书未找到")
+    if old_cert.status != "active":
+        raise HTTPException(status_code=400, detail="只能续期活跃状态的根证书")
+
+    # 从旧证书提取公钥 PEM
+    from cryptography import x509 as crypto_x509
+    from cryptography.hazmat.primitives import serialization as crypto_serialization
+
+    old_x509 = crypto_x509.load_pem_x509_certificate(old_cert.cert_pem.encode())
+    public_key_pem = old_x509.public_key().public_bytes(
+        encoding=crypto_serialization.Encoding.PEM,
+        format=crypto_serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+
+    # 使用旧证书的密钥签发新根证书
+    new_serial = generate_serial_number()
+    new_cert_pem = build_self_signed_root_cert(
+        subject_dn=old_cert.subject_dn,
+        public_key_pem=public_key_pem,
+        private_key_pem=old_cert.key_pem,
+        validity_days=payload.validity_days,
+        serial_number=new_serial,
+        signature_algorithm=old_cert.signature_algorithm,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    new_root = RootCert(
+        serial_number=new_serial,
+        subject_dn=old_cert.subject_dn,
+        issuer_dn=old_cert.subject_dn,
+        signature_algorithm=old_cert.signature_algorithm,
+        not_before=now,
+        not_after=now + timedelta(days=payload.validity_days),
+        cert_pem=new_cert_pem,
+        key_pem=old_cert.key_pem,
+        key_size=old_cert.key_size,
+        status="active",
+    )
+    db.add(new_root)
+    await db.flush()
+
+    save_keystore_file(f"root_{new_serial}.pem", new_cert_pem)
+    save_keystore_file(f"root_{new_serial}.key", old_cert.key_pem)
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("管理员 %s 续期了根证书 %s → %s（%s 天）", current_user.username, serial_number, new_serial, payload.validity_days)
+
+    return RootCertRenewResponse(
+        success=True,
+        message=f"根证书续期成功",
+        old_serial_number=serial_number,
+        new_serial_number=new_serial,
+        subject_dn=old_cert.subject_dn,
+        cert_pem=new_cert_pem,
     )
