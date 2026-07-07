@@ -1,11 +1,8 @@
-/** 统一 API 客户端 — Token 注入、超时、错误转换、文件下载. */
-
 const BASE = '/api'
 const TOKEN_KEY = 'gm_pki_token'
 const USER_KEY = 'gm_pki_user'
-const DEFAULT_TIMEOUT = 30_000 // 30 秒
+const DEFAULT_TIMEOUT = 30_000
 
-/** 后端统一错误响应结构. */
 interface ApiErrorBody {
   success?: boolean
   error_code?: string
@@ -13,49 +10,27 @@ interface ApiErrorBody {
   detail?: unknown
 }
 
-/** 抛出的 API 错误 — 携带后端错误码. */
 export class ApiError extends Error {
   errorCode: string
   statusCode: number
 
   constructor(statusCode: number, body: ApiErrorBody) {
-    super(body.message || body.detail?.toString() || `HTTP ${statusCode}`)
+    const detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? '')
+    super(body.message || detail || `HTTP ${statusCode}`)
     this.errorCode = body.error_code || 'UNKNOWN'
     this.statusCode = statusCode
     this.name = 'ApiError'
   }
 }
 
-// ── 拦截器回调 ─────────────────────────────────────────────────
-
-/** 401 时触发跳转登录页的回调，由路由模块注入. */
 let onUnauthorized: (() => void) | null = null
 
 export function setUnauthorizedHandler(handler: () => void) {
   onUnauthorized = handler
 }
 
-// ── Token 工具 ─────────────────────────────────────────────────
-
 function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
-}
-
-/** 解析 JWT 获取过期时间，若无法解析或已过期返回 true. */
-export function isTokenExpired(): boolean {
-  const token = getToken()
-  if (!token) return true
-  try {
-    const parts = token.split('.')
-    const payloadBase64 = parts[1]
-    if (!payloadBase64) return true
-    const payload = JSON.parse(atob(payloadBase64))
-    const exp: number | undefined = payload.exp
-    if (!exp) return true
-    return Date.now() >= exp * 1000
-  } catch {
-    return true
-  }
 }
 
 function clearAuth() {
@@ -63,37 +38,32 @@ function clearAuth() {
   localStorage.removeItem(USER_KEY)
 }
 
-// ── 核心请求 ───────────────────────────────────────────────────
+export function isTokenExpired(): boolean {
+  const token = getToken()
+  if (!token) return true
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1] || ''))
+    return !payload.exp || Date.now() >= payload.exp * 1000
+  } catch {
+    return true
+  }
+}
 
-async function request<T>(
-  url: string,
-  options?: RequestInit & { timeout?: number },
-): Promise<T> {
+async function request<T>(url: string, options?: RequestInit & { timeout?: number }): Promise<T> {
   const token = getToken()
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT
-
-  // 构建请求头 — 自动注入 Token
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string>),
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
+  if (token) headers.Authorization = `Bearer ${token}`
 
-  // 超时控制
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
 
   try {
-    const res = await fetch(`${BASE}${url}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    })
-
+    const res = await fetch(`${BASE}${url}`, { ...options, headers, signal: controller.signal })
     if (!res.ok) {
-      // 401 / 403 → 清除认证状态并触发跳转
       if (res.status === 401 || res.status === 403) {
         clearAuth()
         onUnauthorized?.()
@@ -101,7 +71,6 @@ async function request<T>(
       const body: ApiErrorBody = await res.json().catch(() => ({}))
       throw new ApiError(res.status, body)
     }
-
     return (await res.json()) as T
   } catch (err) {
     if (err instanceof ApiError) throw err
@@ -114,19 +83,10 @@ async function request<T>(
   }
 }
 
-/** 文件下载 — 返回 Blob，用于证书 / CRL 文件导出. */
-async function download(
-  url: string,
-  filename: string,
-  options?: RequestInit,
-): Promise<void> {
+async function download(url: string, filename: string, options?: RequestInit): Promise<void> {
   const token = getToken()
-  const headers: Record<string, string> = {
-    ...(options?.headers as Record<string, string>),
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
+  const headers: Record<string, string> = { ...(options?.headers as Record<string, string>) }
+  if (token) headers.Authorization = `Bearer ${token}`
 
   const res = await fetch(`${BASE}${url}`, { ...options, headers })
   if (!res.ok) {
@@ -148,23 +108,12 @@ async function download(
   URL.revokeObjectURL(a.href)
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 认证
-// ═══════════════════════════════════════════════════════════════
-
 export const authApi = {
   login: (username: string, password: string) =>
-    request<{
-      success: boolean
-      access_token: string
-      token_type: string
-      username: string
-      role: string
-    }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    }),
-
+    request<{ success: boolean; access_token: string; token_type: string; username: string; role: string }>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ username, password }) },
+    ),
   logout: (token: string) =>
     request<{ success: boolean; message: string }>('/auth/logout', {
       method: 'POST',
@@ -172,64 +121,42 @@ export const authApi = {
     }),
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CA 根证书
-// ═══════════════════════════════════════════════════════════════
-
 export const caApi = {
-  status: () =>
-    request<{ initialized: boolean; ca_name?: string; organization?: string }>(
-      '/ca/status',
-    ),
-
+  status: () => request<{ initialized: boolean; ca_name?: string; organization?: string }>('/ca/status'),
   initialize: (data: Record<string, unknown>) =>
-    request<{
-      success: boolean
-      message: string
-      serial_number: string
-      subject_dn: string
-      cert_pem: string
-    }>('/ca/initialize', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
+    request<{ success: boolean; message: string; serial_number: string; subject_dn: string; cert_pem: string }>(
+      '/ca/initialize',
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
   listRootCerts: () =>
-    request<{ id: string; serial_number: string; subject_dn: string; signature_algorithm: string; not_before: string; not_after: string; status: string }[]>('/ca/root-cert'),
-
-  getRootCert: (serial: string) =>
-    request<Record<string, unknown>>(`/ca/root-cert/${serial}`),
-
-  downloadRootCert: (serial: string) =>
-    download(`/ca/root-cert/${serial}/download`, `root_${serial}.pem`),
+    request<
+      Array<{
+        id: string
+        serial_number: string
+        subject_dn: string
+        signature_algorithm: string
+        not_before: string
+        not_after: string
+        status: string
+      }>
+    >('/ca/root-cert'),
+  getRootCert: (serial: string) => request<Record<string, unknown>>(`/ca/root-cert/${serial}`),
+  downloadRootCert: (serial: string) => download(`/ca/root-cert/${serial}/download`, `root_${serial}.pem`),
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 用户证书
-// ═══════════════════════════════════════════════════════════════
+export interface CertListItem {
+  id: string
+  serial_number: string
+  cert_type: string
+  subject_dn: string
+  user_name: string
+  not_after: string
+  status: string
+}
 
 export const certApi = {
   issue: (data: Record<string, unknown>) =>
-    request<{
-      success: boolean
-      error_code: string
-      message: string
-      sign_serial_number: string | null
-      sign_cert_pem: string | null
-      sign_public_key_pem: string | null
-      sign_key_pem: string | null
-      encrypt_serial_number: string | null
-      encrypt_cert_pem: string | null
-      encrypt_public_key_pem: string | null
-      encrypt_key_pem: string | null
-      subject_dn: string | null
-      root_dn: string | null
-      root_cert_pem: string | null
-    }>('/cert/issue', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
+    request<Record<string, unknown>>('/cert/issue', { method: 'POST', body: JSON.stringify(data) }),
   list: (params?: { cert_type?: string; status?: string; page?: number; page_size?: number }) => {
     const qs = new URLSearchParams()
     if (params?.cert_type) qs.set('cert_type', params.cert_type)
@@ -237,57 +164,114 @@ export const certApi = {
     if (params?.page) qs.set('page', String(params.page))
     if (params?.page_size) qs.set('page_size', String(params.page_size))
     const q = qs.toString()
-    return request<{ items: Array<{ id: string; serial_number: string; cert_type: string; subject_dn: string; user_name: string; not_after: string; status: string }>; total: number; page: number; page_size: number }>(`/cert/list${q ? `?${q}` : ''}`)
+    return request<{ items: CertListItem[]; total: number; page: number; page_size: number }>(
+      `/cert/list${q ? `?${q}` : ''}`,
+    )
   },
-
   detail: (serial: string) => request<Record<string, unknown>>(`/cert/${serial}`),
-
   status: (serial: string) =>
     request<{ serial_number: string; status: string; revoked_at?: string; reason?: string }>(
       `/cert/${serial}/status`,
     ),
-
-  download: (serial: string) =>
-    download(`/cert/${serial}/download`, `${serial}.pem`),
-
+  download: (serial: string) => download(`/cert/${serial}/download`, `${serial}.pem`),
   stats: () =>
-    request<{ total: number; active: number; revoked: number; sign: number; encrypt: number; expiring_soon: number; today_issued: number }>('/cert/stats'),
-
+    request<{
+      total: number
+      active: number
+      revoked: number
+      sign: number
+      encrypt: number
+      expiring_soon: number
+      today_issued: number
+    }>('/cert/stats'),
   activity: () =>
-    request<{ activities: Array<{ type: string; time: string; user: string; serial: string; detail: string }> }>('/cert/activity'),
-
-  // RA 审核工作流
-  apply: (data: { user_name: string; email?: string; organization?: string; department?: string; province?: string; city?: string; cert_type: string; validity_days: number; public_key_pem?: string }) =>
-    request<{ success: boolean; message: string; application_id: string }>('/cert/apply', { method: 'POST', body: JSON.stringify(data) }),
-
+    request<{ activities: Array<{ type: string; time: string; user: string; serial: string; detail: string }> }>(
+      '/cert/activity',
+    ),
+  apply: (data: {
+    user_name: string
+    email?: string
+    organization?: string
+    department?: string
+    province?: string
+    city?: string
+    cert_type: string
+    validity_days: number
+    public_key_pem?: string
+  }) =>
+    request<{ success: boolean; message: string; application_id: string }>('/cert/apply', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   applications: (params?: { status?: string; page?: number; page_size?: number }) => {
     const qs = new URLSearchParams()
     if (params?.status) qs.set('status', params.status)
     if (params?.page) qs.set('page', String(params.page))
     if (params?.page_size) qs.set('page_size', String(params.page_size))
     const q = qs.toString()
-    return request<{ items: Array<{ id: string; user_name: string; email?: string; organization?: string; department?: string; cert_type: string; validity_days: number; status: string; reject_reason?: string; applied_by: string; reviewed_by?: string; issued_cert_serial?: string; created_at: string }>; total: number; page: number; page_size: number }>(`/cert/applications${q ? `?${q}` : ''}`)
+    return request<{
+      items: Array<{
+        id: string
+        user_name: string
+        email?: string
+        organization?: string
+        department?: string
+        cert_type: string
+        validity_days: number
+        status: string
+        reject_reason?: string
+        applied_by: string
+        reviewed_by?: string
+        issued_cert_serial?: string
+        created_at: string
+      }>
+      total: number
+      page: number
+      page_size: number
+    }>(`/cert/applications${q ? `?${q}` : ''}`)
   },
-
   approve: (id: string) =>
-    request<{ success: boolean; message: string; application_id: string; issued_cert_serial?: string }>(`/cert/applications/${id}/approve`, { method: 'POST', body: '{}' }),
-
+    request<{ success: boolean; message: string; application_id: string; issued_cert_serial?: string }>(
+      `/cert/applications/${id}/approve`,
+      { method: 'POST', body: '{}' },
+    ),
   reject: (id: string, reason: string) =>
-    request<{ success: boolean; message: string; application_id: string }>(`/cert/applications/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
-
+    request<{ success: boolean; message: string; application_id: string }>(`/cert/applications/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
   chain: (serial: string) =>
-    request<{ chain: Array<{ serial_number: string; subject_dn: string; issuer_dn: string; cert_type: string; not_before: string; not_after: string; status: string; cert_pem: string }>; depth: number; verified: boolean }>(`/cert/${serial}/chain`),
-
+    request<{
+      chain: Array<{
+        serial_number: string
+        subject_dn: string
+        issuer_dn: string
+        cert_type: string
+        not_before: string
+        not_after: string
+        status: string
+        cert_pem: string
+      }>
+      depth: number
+      verified: boolean
+    }>(`/cert/${serial}/chain`),
   verify: (certPem: string, issuerCertPem: string) =>
-    request<{ valid: boolean; details: string; cert_subject: string; issuer_subject: string; serial_number: string; not_before: string; not_after: string; in_validity_period: boolean }>('/cert/verify', { method: 'POST', body: JSON.stringify({ cert_pem: certPem, issuer_cert_pem: issuerCertPem }) }),
-
+    request<{
+      valid: boolean
+      details: string
+      cert_subject: string
+      issuer_subject: string
+      serial_number: string
+      not_before: string
+      not_after: string
+      in_validity_period: boolean
+    }>('/cert/verify', { method: 'POST', body: JSON.stringify({ cert_pem: certPem, issuer_cert_pem: issuerCertPem }) }),
   verifyRevocation: (certPem: string, crlPem: string) =>
-    request<{ revoked: boolean; reason: string; revocation_date: string; error?: string }>('/cert/verify-revocation', { method: 'POST', body: JSON.stringify({ cert_pem: certPem, crl_pem: crlPem }) }),
+    request<{ revoked: boolean; reason: string | null; revocation_date: string | null; error?: string }>(
+      '/cert/verify-revocation',
+      { method: 'POST', body: JSON.stringify({ cert_pem: certPem, crl_pem: crlPem }) },
+    ),
 }
-
-// ═══════════════════════════════════════════════════════════════
-// 系统配置
-// ═══════════════════════════════════════════════════════════════
 
 export interface SystemConfig {
   app_name: string
@@ -327,15 +311,9 @@ export interface LogQueryResponse {
 }
 
 export const systemApi = {
-  getConfig: () =>
-    request<SystemConfig>('/system/config'),
-
-  getKeystoreInfo: () =>
-    request<KeystoreInfo>('/system/keystore-info'),
-
-  getDatabase: () =>
-    request<DatabaseInfo>('/system/database'),
-
+  getConfig: () => request<SystemConfig>('/system/config'),
+  getKeystoreInfo: () => request<KeystoreInfo>('/system/keystore-info'),
+  getDatabase: () => request<DatabaseInfo>('/system/database'),
   getLogs: (params?: { lines?: number; level?: string }) => {
     const qs = new URLSearchParams()
     if (params?.lines) qs.set('lines', String(params.lines))
@@ -343,34 +321,43 @@ export const systemApi = {
     const q = qs.toString()
     return request<LogQueryResponse>(`/system/logs${q ? `?${q}` : ''}`)
   },
-
-  downloadLogs: () =>
-    download('/system/logs/download', 'app.log'),
-
+  downloadLogs: () => download('/system/logs/download', 'app.log'),
   updateLogLevel: (level: string) =>
-    request<{ success: boolean; previous_level: string; current_level: string; message: string }>(
-      '/system/log-level',
-      { method: 'PUT', body: JSON.stringify({ level }) },
-    ),
-
-  updateConfig: (data: Partial<Pick<SystemConfig, 'keystore_dir' | 'ca_name' | 'organization' | 'default_signature_algorithm' | 'ca_default_validity_days' | 'cert_default_validity_days' | 'crl_validity_hours'>>) =>
-    request<{
-      success: boolean
-      message: string
-      updated_fields: string[]
-      keystore_dir: string
-      ca_name: string
-      organization: string
-      ca_default_validity_days: number
-      cert_default_validity_days: number
-      crl_validity_hours: number
-      default_signature_algorithm: string
-    }>('/system/config', { method: 'PUT', body: JSON.stringify(data) }),
+    request<{ success: boolean; previous_level: string; current_level: string; message: string }>('/system/log-level', {
+      method: 'PUT',
+      body: JSON.stringify({ level }),
+    }),
+  updateConfig: (
+    data: Partial<
+      Pick<
+        SystemConfig,
+        | 'keystore_dir'
+        | 'ca_name'
+        | 'organization'
+        | 'default_signature_algorithm'
+        | 'ca_default_validity_days'
+        | 'cert_default_validity_days'
+        | 'crl_validity_hours'
+      >
+    >,
+  ) =>
+    request<
+      {
+        success: boolean
+        message: string
+        updated_fields: string[]
+      } & Pick<
+        SystemConfig,
+        | 'keystore_dir'
+        | 'ca_name'
+        | 'organization'
+        | 'ca_default_validity_days'
+        | 'cert_default_validity_days'
+        | 'crl_validity_hours'
+        | 'default_signature_algorithm'
+      >
+    >('/system/config', { method: 'PUT', body: JSON.stringify(data) }),
 }
-
-// ═══════════════════════════════════════════════════════════════
-// 管理员用户管理
-// ═══════════════════════════════════════════════════════════════
 
 export interface AdminUserItem {
   id: string
@@ -380,45 +367,29 @@ export interface AdminUserItem {
 }
 
 export const adminApi = {
-  list: () =>
-    request<AdminUserItem[]>('/admin/users'),
-
+  list: () => request<AdminUserItem[]>('/admin/users'),
   create: (data: { username: string; password: string; role: string }) =>
-    request<{ success: boolean; message: string; username: string; role: string }>(
-      '/admin/users',
-      { method: 'POST', body: JSON.stringify(data) },
-    ),
-
-  delete: (username: string) =>
-    request<{ success: boolean; message: string; username: string }>(
-      `/admin/users/${username}`,
-      { method: 'DELETE' },
-    ),
-
-  changePassword: (username: string, newPassword: string) =>
-    request<{ success: boolean; message: string; username: string }>(
-      `/admin/users/${username}/password`,
-      { method: 'PUT', body: JSON.stringify({ new_password: newPassword }) },
-    ),
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CRL 撤销列表
-// ═══════════════════════════════════════════════════════════════
-
-export const crlApi = {
-  revoke: (data: { cert_serial_number: string; reason: string }) =>
-    request<{
-      success: boolean
-      message: string
-      cert_serial_number: string
-      reason: string
-      revoked_at: string
-    }>('/crl/revoke', {
+    request<{ success: boolean; message: string; username: string; role: string }>('/admin/users', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  delete: (username: string) =>
+    request<{ success: boolean; message: string; username: string }>(`/admin/users/${username}`, {
+      method: 'DELETE',
+    }),
+  changePassword: (username: string, newPassword: string) =>
+    request<{ success: boolean; message: string; username: string }>(`/admin/users/${username}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({ new_password: newPassword }),
+    }),
+}
 
+export const crlApi = {
+  revoke: (data: { cert_serial_number: string; reason: string }) =>
+    request<{ success: boolean; message: string; cert_serial_number: string; reason: string; revoked_at: string }>(
+      '/crl/revoke',
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
   generate: () =>
     request<{
       success: boolean
@@ -429,30 +400,34 @@ export const crlApi = {
       revoked_count: number
       crl_pem: string
     }>('/crl/generate', { method: 'POST' }),
-
   current: () =>
-    request<{
-      crl_number: number
-      issuer_dn: string
-      this_update: string
-      next_update: string
-      signature_algorithm: string
-      revoked_count: number
-      crl_pem: string
-      revoked_certificates: Array<{
-        cert_serial_number: string
-        reason: string
-        revoked_at: string
-      }>
-      created_at: string
-    } | { message: string; crl_number: number; revoked_count: number }>('/crl/current'),
-
-  download: () =>
-    download('/crl/download', `crl.pem`),
-
+    request<
+      | {
+          crl_number: number
+          issuer_dn: string
+          this_update: string
+          next_update: string
+          signature_algorithm: string
+          revoked_count: number
+          crl_pem: string
+          revoked_certificates: Array<{ cert_serial_number: string; reason: string; revoked_at: string }>
+          created_at: string
+        }
+      | { message: string; crl_number: number; revoked_count: number }
+    >('/crl/current'),
+  download: () => download('/crl/download', 'crl.pem'),
   history: (page = 1, pageSize = 10) =>
     request<{
-      items: Array<{ id: string; crl_number: number; issuer_dn: string; this_update: string; next_update: string; signature_algorithm: string; revoked_count: number; created_at: string }>
+      items: Array<{
+        id: string
+        crl_number: number
+        issuer_dn: string
+        this_update: string
+        next_update: string
+        signature_algorithm: string
+        revoked_count: number
+        created_at: string
+      }>
       total: number
       page: number
       page_size: number

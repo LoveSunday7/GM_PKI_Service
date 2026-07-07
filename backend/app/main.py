@@ -52,12 +52,19 @@ async def _run_migrations() -> None:
     from alembic import command
     from alembic.config import Config
 
-    alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+    backend_dir = Path(__file__).resolve().parent.parent
+    alembic_cfg = Config()
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
 
     # alembic command.upgrade 是同步调用，内部 env.py 通过 asyncio.run() 执行异步迁移.
     # 在已有事件循环中需通过线程池隔离，避免 "cannot be called from a running event loop" 错误.
     await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+    from app.database import Base
+    import app.models  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     logger.info("数据库迁移完成")
 
 

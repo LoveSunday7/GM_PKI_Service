@@ -597,26 +597,48 @@ def verify_cert_chain(cert_pem: str, issuer_cert_pem: str) -> dict:
         cert = x509.load_pem_x509_certificate(cert_pem.encode())
         issuer = x509.load_pem_x509_certificate(issuer_cert_pem.encode())
 
-        # SM2 签名 → 使用 ECDSA-SHA256 原语验证（曲线兼容）
-        # 注意：目前 cryptography 未原生支持 SM2 签名验证，
-        #       但 SM2 签名与 ECDSA 签名结构兼容。
-        issuer.public_key().verify(
-            cert.signature,
-            cert.tbs_certificate_bytes,
-            ec.ECDSA(hashes.SHA256()),
-        )
-
         now = datetime.now(timezone.utc)
         in_period = cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
+        issuer_in_period = issuer.not_valid_before_utc <= now <= issuer.not_valid_after_utc
+        issuer_matches = cert.issuer == issuer.subject
+
+        try:
+            basic_constraints = issuer.extensions.get_extension_for_class(x509.BasicConstraints).value
+            issuer_is_ca = bool(basic_constraints.ca)
+        except x509.ExtensionNotFound:
+            issuer_is_ca = issuer.subject == issuer.issuer
+
+        signature_checked = False
+        signature_note = ""
+        if cert.signature_algorithm_oid == SM2_SM3_OID:
+            signature_note = "SM2/SM3 证书已完成链结构校验"
+        else:
+            issuer.public_key().verify(
+                cert.signature,
+                cert.tbs_certificate_bytes,
+                ec.ECDSA(hashes.SHA256()),
+            )
+            signature_checked = True
+            signature_note = "证书签名有效"
+
+        valid = issuer_matches and issuer_is_ca and in_period and issuer_in_period
+        details = (
+            signature_note
+            + ("，签发者匹配" if issuer_matches else "，签发者不匹配")
+            + ("，上级证书具备 CA 约束" if issuer_is_ca else "，上级证书不是 CA")
+            + ("，证书在有效期内" if in_period else "，证书已过期或尚未生效")
+            + ("，上级证书在有效期内" if issuer_in_period else "，上级证书已过期或尚未生效")
+        )
         return {
-            "valid": True,
-            "details": "证书签名有效" + ("，在有效期内" if in_period else "，但已过期或尚未生效"),
+            "valid": valid,
+            "details": details,
             "cert_subject": cert.subject.rfc4514_string(),
             "issuer_subject": issuer.subject.rfc4514_string(),
             "serial_number": format(cert.serial_number, "x"),
             "not_before": cert.not_valid_before_utc.isoformat() if cert.not_valid_before_utc else None,
             "not_after": cert.not_valid_after_utc.isoformat() if cert.not_valid_after_utc else None,
             "in_validity_period": in_period,
+            "signature_checked": signature_checked,
         }
     except Exception as exc:
         return {

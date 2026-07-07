@@ -591,7 +591,7 @@ async def get_cert_chain(
             not_before=root_cert.not_before,
             not_after=root_cert.not_after,
             status=root_cert.status,
-            cert_pem=root_cert.cert_pem[:500] + "..." if len(root_cert.cert_pem) > 500 else root_cert.cert_pem,
+            cert_pem=root_cert.cert_pem,
         ))
 
     # 用户证书节点
@@ -603,7 +603,7 @@ async def get_cert_chain(
         not_before=user_cert.not_before,
         not_after=user_cert.not_after,
         status=user_cert.status,
-        cert_pem=user_cert.cert_pem[:500] + "..." if len(user_cert.cert_pem) > 500 else user_cert.cert_pem,
+        cert_pem=user_cert.cert_pem,
     ))
 
     # 验证链签名
