@@ -251,69 +251,6 @@ async def list_certs(
     )
 
 
-@router.get("/{serial_number}", response_model=CertDetailResponse)
-async def get_cert_detail(
-    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
-) -> CertDetailResponse:
-    """查询用户证书详细信息."""
-    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
-    result = await db.execute(stmt)
-    cert = result.scalars().first()
-    if cert is None:
-        raise HTTPException(status_code=404, detail="证书未找到")
-    return CertDetailResponse.model_validate(cert)
-
-
-@router.get("/{serial_number}/download", response_model=CertDownloadResponse)
-async def download_cert(
-    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
-) -> CertDownloadResponse:
-    """下载用户证书（PEM）及 CA 证书链."""
-    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
-    result = await db.execute(stmt)
-    cert = result.scalars().first()
-    if cert is None:
-        raise HTTPException(status_code=404, detail="证书未找到")
-
-    # 同时获取根证书以组成证书链
-    root_stmt = select(RootCert).where(RootCert.serial_number == cert.root_cert_serial)
-    root_result = await db.execute(root_stmt)
-    root_cert = root_result.scalars().first()
-
-    return CertDownloadResponse(
-        cert_pem=cert.cert_pem,
-        key_pem=cert.key_pem,
-        root_cert_pem=root_cert.cert_pem if root_cert else None,
-        filename=f"{serial_number}.pem",
-    )
-
-
-@router.get("/{serial_number}/status", response_model=CertStatusResponse)
-async def check_cert_status(
-    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
-) -> CertStatusResponse:
-    """查询证书的撤销状态."""
-    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
-    result = await db.execute(stmt)
-    cert = result.scalars().first()
-    if cert is None:
-        raise HTTPException(status_code=404, detail="证书未找到")
-
-    response = CertStatusResponse(serial_number=serial_number, status=cert.status)
-
-    if cert.status == "revoked":
-        rev_stmt = select(CRLRevocation).where(
-            CRLRevocation.cert_serial_number == serial_number
-        )
-        rev_result = await db.execute(rev_stmt)
-        rev = rev_result.scalars().first()
-        if rev:
-            response.revoked_at = rev.revoked_at
-            response.reason = rev.reason
-
-    return response
-
-
 # ── 证书验证 ──────────────────────────────────────────────────
 
 
@@ -506,6 +443,69 @@ async def reject_application(
         application_id=app_id,
     )
 
+
+
+@router.get("/{serial_number}", response_model=CertDetailResponse)
+async def get_cert_detail(
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+) -> CertDetailResponse:
+    """查询用户证书详细信息."""
+    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    result = await db.execute(stmt)
+    cert = result.scalars().first()
+    if cert is None:
+        raise HTTPException(status_code=404, detail="证书未找到")
+    return CertDetailResponse.model_validate(cert)
+
+
+@router.get("/{serial_number}/download", response_model=CertDownloadResponse)
+async def download_cert(
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+) -> CertDownloadResponse:
+    """下载用户证书（PEM）及 CA 证书链."""
+    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    result = await db.execute(stmt)
+    cert = result.scalars().first()
+    if cert is None:
+        raise HTTPException(status_code=404, detail="证书未找到")
+
+    # 同时获取根证书以组成证书链
+    root_stmt = select(RootCert).where(RootCert.serial_number == cert.root_cert_serial)
+    root_result = await db.execute(root_stmt)
+    root_cert = root_result.scalars().first()
+
+    return CertDownloadResponse(
+        cert_pem=cert.cert_pem,
+        key_pem=cert.key_pem,
+        root_cert_pem=root_cert.cert_pem if root_cert else None,
+        filename=f"{serial_number}.pem",
+    )
+
+
+@router.get("/{serial_number}/status", response_model=CertStatusResponse)
+async def check_cert_status(
+    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+) -> CertStatusResponse:
+    """查询证书的撤销状态."""
+    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    result = await db.execute(stmt)
+    cert = result.scalars().first()
+    if cert is None:
+        raise HTTPException(status_code=404, detail="证书未找到")
+
+    response = CertStatusResponse(serial_number=serial_number, status=cert.status)
+
+    if cert.status == "revoked":
+        rev_stmt = select(CRLRevocation).where(
+            CRLRevocation.cert_serial_number == serial_number
+        )
+        rev_result = await db.execute(rev_stmt)
+        rev = rev_result.scalars().first()
+        if rev:
+            response.revoked_at = rev.revoked_at
+            response.reason = rev.reason
+
+    return response
 
 @router.get("/{serial_number}/chain", response_model=CertChainResponse)
 async def get_cert_chain(
