@@ -18,21 +18,37 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _add_column_if_missing(table: str, column: sa.Column) -> None:
+    """Add a column only if it doesn't already exist (idempotent)."""
+    import sqlalchemy as sa2
+    conn = op.get_bind()
+    inspector = sa2.inspect(conn)
+    existing = {c["name"] for c in inspector.get_columns(table)}
+    if column.name not in existing:
+        with op.batch_alter_table(table) as batch_op:
+            batch_op.add_column(column)
+
+
 def upgrade() -> None:
-    """Upgrade schema — add missing columns that exist on models but not in older DBs."""
-    # Add first_published_crl to crl_revocation (C009: track first CRL that includes this revocation)
-    with op.batch_alter_table('crl_revocation') as batch_op:
-        batch_op.add_column(sa.Column('first_published_crl', sa.Integer(), nullable=True))
-    # Add is_delta and base_crl_number to crl_publish (C008: Delta CRL support)
-    with op.batch_alter_table('crl_publish') as batch_op:
-        batch_op.add_column(sa.Column('is_delta', sa.Boolean(), server_default='0', nullable=True))
-        batch_op.add_column(sa.Column('base_crl_number', sa.Integer(), nullable=True))
+    """Upgrade schema — add missing columns (idempotent, safe for both fresh and existing DBs)."""
+    _add_column_if_missing('crl_revocation', sa.Column('first_published_crl', sa.Integer(), nullable=True))
+    _add_column_if_missing('crl_publish', sa.Column('is_delta', sa.Boolean(), server_default='0', nullable=True))
+    _add_column_if_missing('crl_publish', sa.Column('base_crl_number', sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
-    """Downgrade schema — remove columns added above."""
-    with op.batch_alter_table('crl_revocation') as batch_op:
-        batch_op.drop_column('first_published_crl')
-    with op.batch_alter_table('crl_publish') as batch_op:
-        batch_op.drop_column('is_delta')
-        batch_op.drop_column('base_crl_number')
+    """Downgrade schema — remove added columns if they exist."""
+    import sqlalchemy as sa2
+    conn = op.get_bind()
+    inspector = sa2.inspect(conn)
+    existing = {c["name"] for c in inspector.get_columns('crl_revocation')}
+    if 'first_published_crl' in existing:
+        with op.batch_alter_table('crl_revocation') as batch_op:
+            batch_op.drop_column('first_published_crl')
+    existing_pub = {c["name"] for c in inspector.get_columns('crl_publish')}
+    if 'is_delta' in existing_pub:
+        with op.batch_alter_table('crl_publish') as batch_op:
+            batch_op.drop_column('is_delta')
+    if 'base_crl_number' in existing_pub:
+        with op.batch_alter_table('crl_publish') as batch_op:
+            batch_op.drop_column('base_crl_number')
