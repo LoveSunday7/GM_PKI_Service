@@ -15,6 +15,18 @@ const certStore = useCertStore()
 const loading = ref(false)
 const crlCopied = ref(false)
 
+// C010: CRL 有效期预警
+const crlValidityWarning = computed(() => {
+  if (!crlStore.currentCRL?.next_update) return null
+  const now = new Date()
+  const next = new Date(crlStore.currentCRL.next_update)
+  const diffHours = (next.getTime() - now.getTime()) / 36e5
+  if (diffHours < 0) return { level: 'expired', msg: 'CRL 已过期，请立即重新生成' }
+  if (diffHours < 2) return { level: 'soon', msg: `CRL 将在 ${Math.round(diffHours * 60)} 分钟后过期，建议重新生成` }
+  if (diffHours < 24) return { level: 'warn', msg: `CRL 将在 ${Math.round(diffHours)} 小时后过期` }
+  return null
+})
+
 // ── CRL 历史 ───────────────────────────────────────────────────
 const history = ref<Array<Record<string, unknown>>>([])
 const historyTotal = ref(0)
@@ -197,6 +209,12 @@ async function copyCRLPEM(pem: string) {
           <div><strong>下次更新</strong> {{ new Date(crlStore.currentCRL.next_update).toLocaleString() }}</div>
           <div><strong>撤销数量</strong> {{ crlStore.currentCRL.revoked_count }}</div>
         </div>
+        <!-- C010: CRL 有效期预警 -->
+        <div v-if="crlValidityWarning" :class="['crl-warning', 'crl-warning-' + crlValidityWarning.level]">
+          {{ crlValidityWarning.level === 'expired' ? '🚨' : crlValidityWarning.level === 'soon' ? '⚠️' : '📢' }}
+          {{ crlValidityWarning.msg }}
+        </div>
+
         <div class="crl-actions">
           <button class="btn-sm" @click="handleDownload">⬇ 下载 CRL</button>
         </div>
@@ -412,6 +430,12 @@ code {
   cursor: pointer;
 }
 .btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
+
+/* C010: CRL 有效期预警 */
+.crl-warning { margin-top: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500; }
+.crl-warning-expired { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+.crl-warning-soon { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+.crl-warning-warn { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 
 .loading { color: #888; font-style: italic; }
 
