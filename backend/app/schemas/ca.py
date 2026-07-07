@@ -55,6 +55,8 @@ class CAInitResponse(BaseModel):
     serial_number: str | None = Field(default=None, description="根证书序列号（十六进制）")
     subject_dn: str | None = Field(default=None, description="根证书主题 DN")
     cert_pem: str | None = Field(default=None, description="根证书 PEM 内容")
+    cert_path: str | None = Field(default=None, description="根证书密钥库文件路径")
+    key_path: str | None = Field(default=None, description="根证书私钥密钥库文件路径")
 
 
 class CAStatusResponse(BaseModel):

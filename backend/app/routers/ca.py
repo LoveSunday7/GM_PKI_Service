@@ -128,6 +128,8 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
         serial_number=serial,
         subject_dn=subject_dn,
         cert_pem=cert_pem,
+        cert_path=cert_path,
+        key_path=key_path,
     )
 
 

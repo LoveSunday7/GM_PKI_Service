@@ -22,6 +22,17 @@ const form = ref({
   key_size: 256,
 })
 
+// 初始化结果
+interface InitResult {
+  serial_number: string
+  subject_dn: string
+  cert_pem: string
+  cert_path: string
+  key_path: string
+}
+const initResult = ref<InitResult | null>(null)
+const initPemCopied = ref(false)
+
 // 证书详情
 const selectedCert = ref<Record<string, unknown> | null>(null)
 const detailLoading = ref(false)
@@ -45,10 +56,24 @@ onMounted(async () => {
 
 async function handleInit() {
   loading.value = true
+  initResult.value = null
   try {
-    const res = await caStore.initialize(form.value)
+    const res = await caStore.initialize(form.value) as {
+      serial_number?: string
+      subject_dn?: string
+      cert_pem?: string
+      cert_path?: string
+      key_path?: string
+    }
     await caStore.fetchRootCerts()
-    toast.success(`根 CA 签发成功！序列号: ${(res as { serial_number?: string }).serial_number?.slice(0, 20)}...`)
+    initResult.value = {
+      serial_number: res.serial_number || '',
+      subject_dn: res.subject_dn || '',
+      cert_pem: res.cert_pem || '',
+      cert_path: res.cert_path || '',
+      key_path: res.key_path || '',
+    }
+    toast.success('根 CA 签发成功！')
   } catch (e: unknown) {
     toast.error(formatError(e))
   } finally {
@@ -69,6 +94,27 @@ async function showDetail(serial: string) {
 
 function closeDetail() {
   selectedCert.value = null
+}
+
+function dismissInitResult() {
+  initResult.value = null
+}
+
+async function copyInitPEM(pem: string) {
+  try {
+    await navigator.clipboard.writeText(pem)
+    initPemCopied.value = true
+    setTimeout(() => { initPemCopied.value = false }, 2000)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = pem
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    initPemCopied.value = true
+    setTimeout(() => { initPemCopied.value = false }, 2000)
+  }
 }
 
 async function copyPEM(pem: string) {
@@ -107,6 +153,39 @@ async function handleDownload(serial: string) {
       <h3>CA 状态</h3>
       <p v-if="caStore.initialized" class="ok">✅ CA 已初始化 — {{ caStore.caName }}</p>
       <p v-else class="warn">⚠️ CA 尚未初始化，请使用下方表单进行初始化。</p>
+    </section>
+
+    <!-- 初始化成功结果面板 -->
+    <section class="section init-result" v-if="initResult">
+      <div class="result-header">
+        <h3>🎉 根 CA 签发成功</h3>
+        <button class="btn-close" @click="dismissInitResult">✕</button>
+      </div>
+      <div class="result-grid">
+        <div class="result-item">
+          <span class="result-label">序列号</span>
+          <span class="result-value"><code>{{ initResult.serial_number }}</code></span>
+        </div>
+        <div class="result-item">
+          <span class="result-label">主题 DN</span>
+          <span class="result-value">{{ initResult.subject_dn }}</span>
+        </div>
+        <div class="result-item">
+          <span class="result-label">证书文件</span>
+          <span class="result-value"><code>{{ initResult.cert_path }}</code></span>
+        </div>
+        <div class="result-item">
+          <span class="result-label">私钥文件</span>
+          <span class="result-value"><code>{{ initResult.key_path }}</code></span>
+        </div>
+        <div class="result-item result-wide">
+          <span class="result-label">证书 PEM</span>
+          <pre class="pem-preview">{{ initResult.cert_pem.slice(0, 500) }}{{ initResult.cert_pem.length > 500 ? '...' : '' }}</pre>
+          <button class="btn-copy" @click="copyInitPEM(initResult.cert_pem)">
+            {{ initPemCopied ? '✅ 已复制' : '📋 复制 PEM' }}
+          </button>
+        </div>
+      </div>
     </section>
 
     <!-- 初始化表单 -->
@@ -437,4 +516,49 @@ code {
   cursor: pointer;
 }
 .btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
+
+/* ── 初始化结果面板 ──────────────────────────────────── */
+.init-result {
+  border: 2px solid #28a745;
+  background: #f8fff8;
+}
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.result-header h3 {
+  margin-bottom: 0;
+  color: #155724;
+}
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+.result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.result-wide {
+  grid-column: 1 / -1;
+}
+.result-label {
+  font-size: 0.78rem;
+  color: #888;
+  font-weight: 600;
+}
+.result-value {
+  font-size: 0.88rem;
+  color: #1a1a2e;
+  word-break: break-all;
+}
+.result-value code {
+  font-size: 0.78rem;
+  background: #f0f0f0;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
 </style>
