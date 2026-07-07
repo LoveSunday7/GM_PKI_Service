@@ -35,6 +35,11 @@ onMounted(async () => {
   try {
     const cfg = await systemApi.getConfig()
     keystorePath.value = cfg.keystore_dir
+    // 用系统设置中的默认值预填表单
+    form.value.ca_name = cfg.ca_name
+    form.value.organization = cfg.organization
+    form.value.signature_algorithm = cfg.default_signature_algorithm
+    form.value.validity_days = cfg.ca_default_validity_days
   } catch { /* ignore */ }
 })
 
