@@ -83,6 +83,7 @@ async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_d
         cert_type=payload.cert_type,
         validity_days=payload.validity_days,
         serial_number=serial,
+        signature_algorithm=root_cert.signature_algorithm,
     )
 
     now = datetime.now(timezone.utc)

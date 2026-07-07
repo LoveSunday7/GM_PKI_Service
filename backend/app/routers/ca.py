@@ -63,6 +63,7 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
         private_key_pem=private_pem,
         validity_days=payload.validity_days,
         serial_number=serial,
+        signature_algorithm=payload.signature_algorithm,
     )
 
     now = datetime.now(timezone.utc)
