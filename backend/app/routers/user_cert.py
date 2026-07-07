@@ -61,74 +61,123 @@ async def _get_active_root_cert(db: AsyncSession) -> RootCert:
     return cert
 
 
-@router.post("/issue", response_model=CertIssueResponse)
-async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CertIssueResponse:
-    """签发新的用户证书（签名证书或加密证书）。"""
-    root_cert = await _get_active_root_cert(db)
-
-    # 生成或导入密钥对
-    if payload.public_key_pem:
-        public_pem = payload.public_key_pem
+def _build_cert(
+    user_name: str,
+    organization: str | None,
+    department: str | None,
+    province: str | None,
+    city: str | None,
+    email: str | None,
+    cert_type: str,
+    validity_days: int,
+    public_key_pem: str | None,
+    root_cert: RootCert,
+) -> dict:
+    """签发单张用户证书，返回 cert dict."""
+    if public_key_pem:
+        public_pem = public_key_pem
         private_pem = None
     else:
         public_pem, private_pem, _ = generate_sm2_keypair()
 
     serial = generate_serial_number()
-
-    # 构建用户主题 DN
     subject_dn = build_dn(
-        common_name=payload.user_name,
-        organization=payload.organization or "Default Org",
+        common_name=user_name,
+        organization=organization or "Default Org",
         country="CN",
-        province=payload.province,
-        city=payload.city,
+        province=province,
+        city=city,
     )
 
-    # 由 CA 签发用户证书
     cert_pem = build_user_cert(
         subject_dn=subject_dn,
         public_key_pem=public_pem,
         issuer_cert_pem=root_cert.cert_pem,
         issuer_key_pem=root_cert.key_pem,
-        cert_type=payload.cert_type,
-        validity_days=payload.validity_days,
+        cert_type=cert_type,
+        validity_days=validity_days,
         serial_number=serial,
         signature_algorithm=root_cert.signature_algorithm,
     )
 
+    return {
+        "serial": serial,
+        "subject_dn": subject_dn,
+        "cert_pem": cert_pem,
+        "public_key_pem": public_pem,
+        "key_pem": private_pem,
+    }
+
+
+@router.post("/issue", response_model=CertIssueResponse)
+async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CertIssueResponse:
+    """签发用户证书（支持单证书和双证书模式）."""
+    root_cert = await _get_active_root_cert(db)
     now = datetime.now(timezone.utc)
 
-    user_cert = UserCert(
-        serial_number=serial,
-        cert_type=payload.cert_type,
-        subject_dn=subject_dn,
-        issuer_dn=root_cert.subject_dn,
-        root_cert_serial=root_cert.serial_number,
-        user_name=payload.user_name,
-        email=payload.email,
-        organization=payload.organization,
-        department=payload.department,
-        province=payload.province,
-        city=payload.city,
-        signature_algorithm=root_cert.signature_algorithm,
-        not_before=now,
-        not_after=now.replace(year=now.year + (payload.validity_days // 365)),
-        cert_pem=cert_pem,
-        key_pem=private_pem,
-        public_key_pem=public_pem,
-        status="active",
+    cert_types: list[str] = (
+        ["sign", "encrypt"] if payload.cert_type == "both" else [payload.cert_type]
     )
-    db.add(user_cert)
+
+    results: dict[str, dict] = {}
+
+    for ct in cert_types:
+        info = _build_cert(
+            user_name=payload.user_name,
+            organization=payload.organization,
+            department=payload.department,
+            province=payload.province,
+            city=payload.city,
+            email=payload.email,
+            cert_type=ct,
+            validity_days=payload.validity_days,
+            public_key_pem=payload.public_key_pem if ct == "sign" else None,
+            root_cert=root_cert,
+        )
+        results[ct] = info
+
+        user_cert = UserCert(
+            serial_number=info["serial"],
+            cert_type=ct,
+            subject_dn=info["subject_dn"],
+            issuer_dn=root_cert.subject_dn,
+            root_cert_serial=root_cert.serial_number,
+            user_name=payload.user_name,
+            email=payload.email,
+            organization=payload.organization,
+            department=payload.department,
+            province=payload.province,
+            city=payload.city,
+            signature_algorithm=root_cert.signature_algorithm,
+            not_before=now,
+            not_after=now + timedelta(days=payload.validity_days),
+            cert_pem=info["cert_pem"],
+            key_pem=info["key_pem"],
+            public_key_pem=info["public_key_pem"],
+            status="active",
+        )
+        db.add(user_cert)
+
     await db.flush()
 
+    sign = results.get("sign", {})
+    encrypt = results.get("encrypt", {})
+
+    count = len(cert_types)
     return CertIssueResponse(
         success=True,
-        message="用户证书签发成功",
-        serial_number=serial,
-        subject_dn=subject_dn,
-        cert_pem=cert_pem,
-        public_key_pem=public_pem,
-        key_pem=private_pem,
+        error_code="SUCCESS",
+        message=f"用户证书签发成功（{'签名+加密' if count == 2 else '签名' if payload.cert_type == 'sign' else '加密'}）",
+        sign_serial_number=sign.get("serial"),
+        sign_cert_pem=sign.get("cert_pem"),
+        sign_public_key_pem=sign.get("public_key_pem"),
+        sign_key_pem=sign.get("key_pem"),
+        encrypt_serial_number=encrypt.get("serial") if encrypt else None,
+        encrypt_cert_pem=encrypt.get("cert_pem") if encrypt else None,
+        encrypt_public_key_pem=encrypt.get("public_key_pem") if encrypt else None,
+        encrypt_key_pem=encrypt.get("key_pem") if encrypt else None,
+        subject_dn=sign.get("subject_dn") or encrypt.get("subject_dn"),
+        root_dn=root_cert.subject_dn,
         root_cert_pem=root_cert.cert_pem,
     )
 

@@ -19,11 +19,11 @@ REVOCATION_REASONS = [
 ]
 
 REVOCATION_REASON_LABELS: dict[str, str] = {
-    "unspecified": "未指定",
+    "unspecified": "误签发 / 未指定",
     "keyCompromise": "密钥泄露",
-    "affiliationChanged": "隶属关系变更",
+    "affiliationChanged": "离职 / 隶属关系变更",
     "superseded": "已被取代",
-    "cessationOfOperation": "停止运营",
+    "cessationOfOperation": "失效 / 停止运营",
     "certificateHold": "证书冻结（临时挂起）",
 }
 

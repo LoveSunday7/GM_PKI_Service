@@ -212,13 +212,19 @@ export const certApi = {
   issue: (data: Record<string, unknown>) =>
     request<{
       success: boolean
+      error_code: string
       message: string
-      serial_number: string
-      subject_dn: string
-      cert_pem: string
-      public_key_pem: string | null
-      key_pem: string | null
-      root_cert_pem: string
+      sign_serial_number: string | null
+      sign_cert_pem: string | null
+      sign_public_key_pem: string | null
+      sign_key_pem: string | null
+      encrypt_serial_number: string | null
+      encrypt_cert_pem: string | null
+      encrypt_public_key_pem: string | null
+      encrypt_key_pem: string | null
+      subject_dn: string | null
+      root_dn: string | null
+      root_cert_pem: string | null
     }>('/cert/issue', {
       method: 'POST',
       body: JSON.stringify(data),

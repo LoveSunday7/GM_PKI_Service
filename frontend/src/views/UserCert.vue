@@ -89,6 +89,25 @@ const form = ref({
   public_key_pem: '',
 })
 
+// 签发结果
+interface IssueResult {
+  error_code: string
+  message: string
+  sign_serial_number: string | null
+  sign_cert_pem: string | null
+  sign_public_key_pem: string | null
+  sign_key_pem: string | null
+  encrypt_serial_number: string | null
+  encrypt_cert_pem: string | null
+  encrypt_public_key_pem: string | null
+  encrypt_key_pem: string | null
+  subject_dn: string | null
+  root_dn: string | null
+  root_cert_pem: string | null
+}
+const issueResult = ref<IssueResult | null>(null)
+const issueCopied = ref('')
+
 // 详情面板
 const selectedCert = ref<Record<string, unknown> | null>(null)
 const detailLoading = ref(false)
@@ -104,20 +123,40 @@ onMounted(async () => {
 
 async function handleIssue() {
   loading.value = true
+  issueResult.value = null
   try {
     const payload: Record<string, unknown> = { ...form.value }
     if (!payload.public_key_pem) delete payload.public_key_pem
-    const res = await certStore.issue(payload)
-    const issueRes = res as { serial_number?: string }
-    toast.success(`签发成功！序列号: ${issueRes.serial_number?.slice(0, 20)}...`)
+    const res = await certStore.issue(payload) as IssueResult
+    issueResult.value = res
+    toast.success(`签发成功！`)
     loadCerts(1)
-    form.value.user_name = ''
-    form.value.email = ''
   } catch (e: unknown) {
     toast.error(formatError(e))
   } finally {
     loading.value = false
   }
+}
+
+function dismissIssueResult() {
+  issueResult.value = null
+  form.value.user_name = ''
+  form.value.email = ''
+}
+
+async function copyIssue(pem: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(pem)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = pem
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  issueCopied.value = label
+  setTimeout(() => { issueCopied.value = '' }, 2000)
 }
 
 async function showDetail(serial: string) {
@@ -189,6 +228,7 @@ async function copyText(text: string, field: string) {
           <select v-model="form.cert_type">
             <option value="sign">签名证书</option>
             <option value="encrypt">加密证书</option>
+            <option value="both">双证书 (签名+加密)</option>
           </select>
         </label>
         <label>有效期（天）<input v-model.number="form.validity_days" type="number" min="1" max="36500" /></label>
@@ -202,7 +242,71 @@ async function copyText(text: string, field: string) {
         </div>
       </form>
     </section>
-    <section class="section" v-else>
+
+    <!-- 签发结果面板 -->
+    <section class="section issue-result" v-if="issueResult">
+      <div class="result-header">
+        <h3>🎉 {{ issueResult.message }}</h3>
+        <button class="btn-close" @click="dismissIssueResult">✕</button>
+      </div>
+
+      <!-- 基本信息 -->
+      <div class="result-meta">
+        <div class="result-item"><span class="result-label">错误码</span><span class="result-value"><code>{{ issueResult.error_code || '—' }}</code></span></div>
+        <div class="result-item"><span class="result-label">用户 DN</span><span class="result-value">{{ issueResult.subject_dn || '—' }}</span></div>
+        <div class="result-item"><span class="result-label">根 DN</span><span class="result-value">{{ issueResult.root_dn || '—' }}</span></div>
+      </div>
+
+      <!-- 签名证书 (始终显示) -->
+      <div class="cert-block">
+        <h4>📜 签名证书</h4>
+        <div class="result-meta" v-if="issueResult.sign_serial_number">
+          <div class="result-item"><span class="result-label">序列号</span><span class="result-value"><code>{{ issueResult.sign_serial_number }}</code></span></div>
+        </div>
+        <div v-if="issueResult.sign_cert_pem">
+          <pre class="pem-preview">{{ issueResult.sign_cert_pem.slice(0, 400) }}{{ issueResult.sign_cert_pem.length > 400 ? '...' : '' }}</pre>
+          <div class="copy-row">
+            <button class="btn-copy" @click="copyIssue(issueResult.sign_cert_pem, 'sign_cert')">{{ issueCopied === 'sign_cert' ? '✅' : '📋' }} 复制签名证书 PEM</button>
+            <button class="btn-copy" v-if="issueResult.sign_public_key_pem" @click="copyIssue(issueResult.sign_public_key_pem, 'sign_pub')">{{ issueCopied === 'sign_pub' ? '✅' : '📋' }} 复制签名公钥</button>
+            <button class="btn-copy" v-if="issueResult.sign_key_pem" @click="copyIssue(issueResult.sign_key_pem, 'sign_key')">{{ issueCopied === 'sign_key' ? '✅' : '📋' }} 复制签名私钥</button>
+            <span v-if="!issueResult.sign_key_pem" class="result-value" style="color:#888;font-size:0.8rem">（私钥由用户自行保管）</span>
+          </div>
+        </div>
+        <p v-else class="result-value" style="color:#888">（未签发签名证书）</p>
+      </div>
+
+      <!-- 加密证书 (始终显示) -->
+      <div class="cert-block">
+        <h4>🔒 加密证书</h4>
+        <div class="result-meta" v-if="issueResult.encrypt_serial_number">
+          <div class="result-item"><span class="result-label">序列号</span><span class="result-value"><code>{{ issueResult.encrypt_serial_number }}</code></span></div>
+        </div>
+        <div v-if="issueResult.encrypt_cert_pem">
+          <pre class="pem-preview">{{ issueResult.encrypt_cert_pem.slice(0, 400) }}{{ issueResult.encrypt_cert_pem.length > 400 ? '...' : '' }}</pre>
+          <div class="copy-row">
+            <button class="btn-copy" @click="copyIssue(issueResult.encrypt_cert_pem, 'enc_cert')">{{ issueCopied === 'enc_cert' ? '✅' : '📋' }} 复制加密证书 PEM</button>
+            <button class="btn-copy" v-if="issueResult.encrypt_public_key_pem" @click="copyIssue(issueResult.encrypt_public_key_pem, 'enc_pub')">{{ issueCopied === 'enc_pub' ? '✅' : '📋' }} 复制加密公钥</button>
+            <button class="btn-copy" v-if="issueResult.encrypt_key_pem" @click="copyIssue(issueResult.encrypt_key_pem, 'enc_key')">{{ issueCopied === 'enc_key' ? '✅' : '📋' }} 复制加密私钥</button>
+            <span v-if="!issueResult.encrypt_key_pem" class="result-value" style="color:#888;font-size:0.8rem">（私钥由用户自行保管或使用双证书模式自动生成）</span>
+          </div>
+        </div>
+        <p v-else class="result-value" style="color:#888">（未签发加密证书，请选择"双证书"模式同时签发签名+加密证书）</p>
+      </div>
+
+      <!-- 根证书 (始终显示) -->
+      <div class="cert-block">
+        <h4>🏛️ 根证书</h4>
+        <div v-if="issueResult.root_cert_pem">
+          <pre class="pem-preview">{{ issueResult.root_cert_pem.slice(0, 400) }}{{ issueResult.root_cert_pem.length > 400 ? '...' : '' }}</pre>
+          <div class="copy-row">
+            <button class="btn-copy" @click="copyIssue(issueResult.root_cert_pem, 'root')">{{ issueCopied === 'root' ? '✅' : '📋' }} 复制根证书 PEM</button>
+          </div>
+        </div>
+        <p v-else class="result-value" style="color:red">未获取到根证书</p>
+      </div>
+    </section>
+
+    <section class="section" v-else-if="!caStore.initialized">
       <p class="warn">⚠️ 请先初始化 CA。</p>
     </section>
 
@@ -532,4 +636,63 @@ code { font-size: 0.8rem; background: #f0f0f0; padding: 0.15rem 0.35rem; border-
 .pem-preview { background: #f8f8f8; padding: 0.5rem; border-radius: 6px; font-size: 0.72rem; font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto; margin-bottom: 0.4rem; }
 .btn-copy { padding: 0.3rem 0.7rem; font-size: 0.78rem; background: transparent; color: #0f3460; border: 1px solid #0f3460; border-radius: 6px; cursor: pointer; }
 .btn-copy:hover { background: rgba(15, 52, 96, 0.06); }
+
+/* ── 签发结果面板 ──────────────────────────────────── */
+.issue-result {
+  border: 2px solid #28a745;
+  background: #f8fff8;
+}
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.result-header h3 {
+  margin-bottom: 0;
+  color: #155724;
+}
+.result-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.5rem 1.5rem;
+  margin-bottom: 1rem;
+}
+.result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.result-label {
+  font-size: 0.75rem;
+  color: #888;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.result-value {
+  font-size: 0.85rem;
+  color: #1a1a2e;
+  word-break: break-all;
+}
+.result-value code {
+  font-size: 0.76rem;
+  background: #f0f0f0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+.cert-block {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #d4edda;
+}
+.cert-block h4 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: #155724;
+}
+.copy-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 </style>

@@ -73,11 +73,12 @@ function onSerialBlur() {
 }
 
 const reasonLabels: Record<string, string> = {
-  unspecified: '未指定',
+  unspecified: '误签发 / 未指定',
   keyCompromise: '密钥泄露',
-  affiliationChanged: '隶属关系变更',
+  affiliationChanged: '离职 / 隶属关系变更',
   superseded: '已被取代',
-  cessationOfOperation: '停止运营',
+  cessationOfOperation: '失效 / 停止运营',
+  certificateHold: '证书冻结（临时挂起）',
 }
 
 const revokeForm = ref({
@@ -178,11 +179,12 @@ async function copyCRLPEM(pem: string) {
         <label>
           撤销原因
           <select v-model="revokeForm.reason">
-            <option value="unspecified">未指定</option>
             <option value="keyCompromise">密钥泄露</option>
-            <option value="affiliationChanged">隶属关系变更</option>
+            <option value="affiliationChanged">离职 / 隶属关系变更</option>
+            <option value="cessationOfOperation">失效 / 停止运营</option>
+            <option value="unspecified">误签发 / 未指定</option>
             <option value="superseded">已被取代</option>
-            <option value="cessationOfOperation">停止运营</option>
+            <option value="certificateHold">证书冻结（临时挂起）</option>
           </select>
         </label>
         <button type="submit" :disabled="loading">{{ loading ? '...' : '撤销' }}</button>

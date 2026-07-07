@@ -18,8 +18,8 @@ class CertIssueRequest(BaseModel):
     city: str | None = Field(default=None, max_length=128, description="城市")
     cert_type: str = Field(
         default="sign",
-        pattern="^(sign|encrypt)$",
-        description="证书类型：sign=签名证书, encrypt=加密证书",
+        pattern="^(sign|encrypt|both)$",
+        description="证书类型：sign=签名证书, encrypt=加密证书, both=双证书（签名+加密）",
     )
     validity_days: int = Field(default=365, ge=1, le=36500, description="证书有效期（天）")
     public_key_pem: str | None = Field(
@@ -31,12 +31,21 @@ class CertIssueResponse(BaseModel):
     """用户证书签发成功响应."""
 
     success: bool = Field(description="是否成功")
+    error_code: str = Field(default="SUCCESS", description="错误码（SUCCESS 表示成功）")
     message: str = Field(description="结果描述")
-    serial_number: str | None = Field(default=None, description="证书序列号（十六进制）")
-    subject_dn: str | None = Field(default=None, description="证书主题 DN")
-    cert_pem: str | None = Field(default=None, description="用户证书 PEM")
-    public_key_pem: str | None = Field(default=None, description="用户公钥 PEM")
-    key_pem: str | None = Field(default=None, description="用户私钥 PEM（仅自动生成密钥时返回）")
+    # 签名证书
+    sign_serial_number: str | None = Field(default=None, description="签名证书序列号（十六进制）")
+    sign_cert_pem: str | None = Field(default=None, description="签名证书 PEM")
+    sign_public_key_pem: str | None = Field(default=None, description="签名证书公钥 PEM")
+    sign_key_pem: str | None = Field(default=None, description="签名证书私钥 PEM（仅自动生成时返回）")
+    # 加密证书（仅双证书模式返回）
+    encrypt_serial_number: str | None = Field(default=None, description="加密证书序列号（十六进制）")
+    encrypt_cert_pem: str | None = Field(default=None, description="加密证书 PEM")
+    encrypt_public_key_pem: str | None = Field(default=None, description="加密证书公钥 PEM")
+    encrypt_key_pem: str | None = Field(default=None, description="加密证书私钥 PEM（仅自动生成时返回）")
+    # 共同字段
+    subject_dn: str | None = Field(default=None, description="用户主题 DN")
+    root_dn: str | None = Field(default=None, description="根证书主题 DN")
     root_cert_pem: str | None = Field(default=None, description="根证书 PEM")
 
 
