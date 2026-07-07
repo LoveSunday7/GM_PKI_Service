@@ -19,7 +19,7 @@ from app.config import settings
 from app.database import check_db, engine
 from app.exceptions import register_exception_handlers
 from app.logging_config import setup_logging
-from app.routers import admin, auth, ca, crl, dn_profile, ocsp, system, user_cert
+from app.routers import admin, auth, ca, crl, dn_profile, system, user_cert
 
 # ── 初始化日志系统 ─────────────────────────────────────────────────
 setup_logging()
@@ -84,7 +84,7 @@ _tags_metadata = [
     {"name": "CA", "description": "根证书签发、查询、下载"},
     {"name": "用户证书", "description": "用户证书签发、查询、撤销状态"},
     {"name": "CRL", "description": "证书撤销、CRL 生成、查询、下载"},
-    {"name": "OCSP", "description": "在线证书状态实时查询"},
+
     {"name": "系统", "description": "系统配置、数据库信息、日志管理"},
     {"name": "DN档案", "description": "用户 DN 身份档案管理（创建、查询、更新、删除）"},
 ]
@@ -133,7 +133,6 @@ app.include_router(admin.router)
 app.include_router(ca.router)
 app.include_router(user_cert.router)
 app.include_router(crl.router)
-app.include_router(ocsp.router)
 app.include_router(system.router)
 app.include_router(dn_profile.router)
 

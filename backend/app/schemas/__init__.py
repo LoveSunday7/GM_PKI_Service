@@ -59,7 +59,7 @@ from app.schemas.system import (
     LogQueryResponse,
     SystemConfigResponse,
 )
-from app.schemas.ocsp import OCSPQueryRequest, OCSPQueryResponse
+
 from app.schemas.verify import (
     CertVerifyRequest,
     CertVerifyResponse,
@@ -133,9 +133,6 @@ __all__ = [
     "CRLDownloadResponse",
     "CRLHistoryItem",
     "CRLHistoryResponse",
-    # OCSP
-    "OCSPQueryRequest",
-    "OCSPQueryResponse",
     # 验证
     "CertVerifyRequest",
     "CertVerifyResponse",

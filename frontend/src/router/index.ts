@@ -42,12 +42,7 @@ const router = createRouter({
       component: () => import('@/views/CertVerify.vue'),
       meta: { requiresAuth: true, title: '证书验证' },
     },
-    {
-      path: '/ocsp',
-      name: 'OCSPQuery',
-      component: () => import('@/views/OCSPQuery.vue'),
-      meta: { requiresAuth: true, title: 'OCSP 查询' },
-    },
+
     {
       path: '/cert-apply',
       name: 'CertApply',
