@@ -498,6 +498,96 @@ def list_keystore_files() -> list[str]:
 
 
 # ──────────────────────────────────────────────────────────────────
+# CRL 构建 (C005)
+# ──────────────────────────────────────────────────────────────────
+
+
+def build_crl(
+    ca_cert_pem: str,
+    ca_key_pem: str,
+    crl_number: int,
+    this_update: datetime,
+    next_update: datetime,
+    revoked_entries: list[dict],
+) -> str:
+    """构建 X.509 CRL PEM（C005：提取自 crl.py 的共享逻辑）。"""
+    ca_private_key = serialization.load_pem_private_key(ca_key_pem.encode(), password=None)
+    ca_cert = x509.load_pem_x509_certificate(ca_cert_pem.encode())
+
+    crl_entries: list[x509.RevokedCertificate] = []
+    for entry in revoked_entries:
+        try:
+            serial = int(entry["cert_serial_number"], 16) % (2 ** 128)
+            dt = entry.get("revoked_at")
+            if isinstance(dt, str):
+                dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            builder = x509.RevokedCertificateBuilder().serial_number(serial).revocation_date(dt)
+            try:
+                reason_str = entry.get("reason", "unspecified") or "unspecified"
+                flag = getattr(x509.ReasonFlags, reason_str, x509.ReasonFlags.unspecified)
+                builder = builder.add_extension(x509.CRLReason(flag), critical=False)
+            except Exception:
+                pass
+            crl_entries.append(builder.build())
+        except (ValueError, TypeError):
+            continue
+
+    crl_builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(ca_cert.subject)
+        .last_update(this_update)
+        .next_update(next_update)
+        .add_extension(x509.CRLNumber(crl_number), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()),
+            critical=False,
+        )
+    )
+
+    for entry in crl_entries:
+        crl_builder = crl_builder.add_revoked_certificate(entry)
+
+    crl = crl_builder.sign(ca_private_key, hashes.SHA256())
+    return crl.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+
+# ──────────────────────────────────────────────────────────────────
+# CRL 验证
+# ──────────────────────────────────────────────────────────────────
+
+
+def verify_crl_signature(crl_pem: str, ca_cert_pem: str) -> dict:
+    """C006: 验证 CRL 签名 — 使用 CA 公钥校验 CRL 未被篡改。"""
+    try:
+        crl = x509.load_pem_x509_crl(crl_pem.encode())
+        ca_cert = x509.load_pem_x509_certificate(ca_cert_pem.encode())
+
+        ca_cert.public_key().verify(
+            crl.signature,
+            crl.tbs_certlist_bytes,
+            ec.ECDSA(hashes.SHA256()),
+        )
+
+        now = datetime.now(timezone.utc)
+        is_current = crl.last_update_utc <= now <= crl.next_update_utc if crl.last_update_utc and crl.next_update_utc else None
+
+        return {
+            "valid": True,
+            "details": "CRL 签名有效" + ("，在当前有效期内" if is_current else "" if is_current is None else "，但已过期"),
+            "issuer": crl.issuer.rfc4514_string(),
+            "last_update": crl.last_update_utc.isoformat() if crl.last_update_utc else None,
+            "next_update": crl.next_update_utc.isoformat() if crl.next_update_utc else None,
+            "is_current": is_current,
+        }
+    except Exception as exc:
+        return {
+            "valid": False,
+            "details": f"CRL 签名验证失败: {exc}",
+            "issuer": "", "last_update": None, "next_update": None, "is_current": False,
+        }
+
+
+# ──────────────────────────────────────────────────────────────────
 # 证书验证
 # ──────────────────────────────────────────────────────────────────
 
@@ -539,20 +629,32 @@ def verify_cert_chain(cert_pem: str, issuer_cert_pem: str) -> dict:
 
 
 def verify_cert_against_crl(cert_pem: str, crl_pem: str) -> dict:
-    """基于 CRL 验证证书是否已被撤销."""
+    """C007: 基于 CRL 验证证书是否已被撤销（含 CRL 有效期检查）."""
     try:
         cert = x509.load_pem_x509_certificate(cert_pem.encode())
         crl = x509.load_pem_x509_crl(crl_pem.encode())
+
+        # C007: CRL 有效期检查
+        now = datetime.now(timezone.utc)
+        crl_stale = False
+        stale_msg = None
+        if crl.last_update_utc and crl.next_update_utc:
+            if now > crl.next_update_utc:
+                crl_stale = True
+                stale_msg = "CRL 已过期，请获取最新 CRL"
+
         for entry in crl:
             if entry.serial_number == cert.serial_number:
                 return {
                     "revoked": True,
                     "reason": str(entry.extensions) if entry.extensions else "证书已被撤销",
                     "revocation_date": entry.revocation_date_utc.isoformat() if entry.revocation_date_utc else None,
+                    "crl_stale": crl_stale,
+                    "crl_stale_message": stale_msg,
                 }
-        return {"revoked": False, "reason": None, "revocation_date": None}
+        return {"revoked": False, "reason": None, "revocation_date": None, "crl_stale": crl_stale, "crl_stale_message": stale_msg}
     except Exception as exc:
-        return {"revoked": False, "reason": f"CRL 解析失败: {exc}", "revocation_date": None, "error": str(exc)}
+        return {"revoked": False, "reason": f"CRL 解析失败: {exc}", "revocation_date": None, "error": str(exc), "crl_stale": False, "crl_stale_message": None}
 
 
 def extract_cert_info(cert_pem: str) -> dict:
