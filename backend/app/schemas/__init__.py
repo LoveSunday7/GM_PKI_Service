@@ -41,6 +41,12 @@ from app.schemas.crl import (
     CRLRevokeResponse,
 )
 from app.schemas.common import ErrorResponse, SuccessResponse
+from app.schemas.dn_profile import (
+    DNProfileCreate,
+    DNProfileItem,
+    DNProfileResponse,
+    DNProfileUpdate,
+)
 from app.schemas.system import (
     ConfigUpdateRequest,
     ConfigUpdateResponse,
@@ -76,6 +82,11 @@ __all__ = [
     # 通用
     "SuccessResponse",
     "ErrorResponse",
+    # DN 档案
+    "DNProfileCreate",
+    "DNProfileItem",
+    "DNProfileResponse",
+    "DNProfileUpdate",
     # 系统
     "SystemConfigResponse",
     "LogLevelRequest",
