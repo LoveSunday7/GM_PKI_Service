@@ -55,6 +55,8 @@ def upgrade() -> None:
     sa.Column('signature_algorithm', sa.String(length=64), nullable=False),
     sa.Column('crl_pem', sa.Text(), nullable=False),
     sa.Column('revoked_count', sa.Integer(), nullable=False),
+    sa.Column('is_delta', sa.Boolean(), server_default='0', nullable=True),
+    sa.Column('base_crl_number', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
@@ -64,6 +66,7 @@ def upgrade() -> None:
     sa.Column('cert_serial_number', sa.String(length=64), nullable=False),
     sa.Column('reason', sa.String(length=128), nullable=False),
     sa.Column('revoked_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('first_published_crl', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
