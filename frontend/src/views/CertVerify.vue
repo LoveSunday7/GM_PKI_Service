@@ -1,41 +1,37 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { certApi, crlApi } from '@/api'
+import { useToast } from '@/composables/useToast'
+import { formatError } from '@/utils/errors'
 
 defineOptions({ name: 'CertVerifyPage' })
 
+const toast = useToast()
 const certPem = ref('')
 const issuerCertPem = ref('')
 const crlPem = ref('')
 const loading = ref(false)
-const error = ref('')
 
-// 签名验证结果
 const signResult = ref<{
   valid?: boolean; details?: string; cert_subject?: string
   issuer_subject?: string; serial_number?: string
   not_before?: string; not_after?: string; in_validity_period?: boolean
 } | null>(null)
 
-// 撤销验证结果
 const crlResult = ref<{
   revoked?: boolean; reason?: string; revocation_date?: string; error?: string
 } | null>(null)
 
 async function verifySignature() {
   if (!certPem.value.trim() || !issuerCertPem.value.trim()) {
-    error.value = '请填写证书和上级证书 PEM'
+    toast.error('请填写证书和上级证书 PEM')
     return
   }
-  loading.value = true; error.value = ''; signResult.value = null
+  loading.value = true; signResult.value = null
   try {
-    const res = await fetch('/api/cert/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('gm_pki_token')}` },
-      body: JSON.stringify({ cert_pem: certPem.value, issuer_cert_pem: issuerCertPem.value }),
-    })
-    signResult.value = await res.json()
+    signResult.value = await certApi.verify(certPem.value, issuerCertPem.value)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '验证失败'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -43,19 +39,14 @@ async function verifySignature() {
 
 async function verifyRevocation() {
   if (!certPem.value.trim() || !crlPem.value.trim()) {
-    error.value = '请填写证书和 CRL PEM'
+    toast.error('请填写证书和 CRL PEM')
     return
   }
-  loading.value = true; error.value = ''; crlResult.value = null
+  loading.value = true; crlResult.value = null
   try {
-    const res = await fetch('/api/cert/verify-revocation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('gm_pki_token')}` },
-      body: JSON.stringify({ cert_pem: certPem.value, crl_pem: crlPem.value }),
-    })
-    crlResult.value = await res.json()
+    crlResult.value = await certApi.verifyRevocation(certPem.value, crlPem.value)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '验证失败'
+    toast.error(formatError(e))
   } finally {
     loading.value = false
   }
@@ -63,13 +54,16 @@ async function verifyRevocation() {
 
 async function loadCurrentCRL() {
   try {
-    const res = await fetch('/api/crl/download', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('gm_pki_token')}` },
-    })
-    if (res.ok) {
-      crlPem.value = await res.text()
+    const data = await crlApi.current()
+    if ('crl_pem' in data) {
+      crlPem.value = data.crl_pem
+      toast.success('CRL 加载成功')
+    } else {
+      toast.error('暂无 CRL 数据')
     }
-  } catch { /* ignore */ }
+  } catch (e: unknown) {
+    toast.error(formatError(e))
+  }
 }
 </script>
 
@@ -119,8 +113,6 @@ async function loadCurrentCRL() {
         <p v-if="crlResult.error" class="warn">{{ crlResult.error }}</p>
       </div>
     </section>
-
-    <p v-if="error" class="error">{{ error }}</p>
   </div>
 </template>
 
@@ -145,6 +137,5 @@ textarea {
 .iv dt { color: #555; font-weight: 600; }
 .iv-row { display: flex; gap: 0.75rem; align-items: flex-start; }
 .iv-row textarea { flex: 1; }
-.error { color: #c00; margin-top: 1rem; }
 .warn { color: #856404; }
 </style>
