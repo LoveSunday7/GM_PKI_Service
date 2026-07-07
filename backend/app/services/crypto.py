@@ -360,6 +360,19 @@ def build_self_signed_root_cert(
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(public_key), critical=False)
     )
 
+    # C002: CRL Distribution Points 扩展
+    from cryptography.x509 import UniformResourceIdentifier, DistributionPoint, CRLDistributionPoints, Name, DNSName
+    try:
+        builder = builder.add_extension(
+            CRLDistributionPoints([DistributionPoint(
+                full_name=[UniformResourceIdentifier("http://localhost:8000/api/crl/download")],
+                relative_name=None, crl_issuer=None, reasons=None
+            )]),
+            critical=False,
+        )
+    except Exception:
+        pass  # CDP 非关键，失败不影响签发
+
     if signature_algorithm == "SM3WITHSM2":
         key_hex = _load_private_key_hex(private_key_pem)
         return _sm2_sign_certificate(builder, private_key_pem, key_hex)
@@ -423,6 +436,19 @@ def build_user_cert(
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(user_pub), critical=False)
     )
+
+    # C002: CRL Distribution Points 扩展
+    from cryptography.x509 import UniformResourceIdentifier, DistributionPoint, CRLDistributionPoints
+    try:
+        builder = builder.add_extension(
+            CRLDistributionPoints([DistributionPoint(
+                full_name=[UniformResourceIdentifier("http://localhost:8000/api/crl/download")],
+                relative_name=None, crl_issuer=None, reasons=None
+            )]),
+            critical=False,
+        )
+    except Exception:
+        pass
 
     if signature_algorithm == "SM3WITHSM2":
         ca_priv_hex = _load_private_key_hex(issuer_key_pem)

@@ -15,6 +15,7 @@ REVOCATION_REASONS = [
     "affiliationChanged",
     "superseded",
     "cessationOfOperation",
+    "certificateHold",
 ]
 
 REVOCATION_REASON_LABELS: dict[str, str] = {
@@ -23,6 +24,17 @@ REVOCATION_REASON_LABELS: dict[str, str] = {
     "affiliationChanged": "隶属关系变更",
     "superseded": "已被取代",
     "cessationOfOperation": "停止运营",
+    "certificateHold": "证书冻结（临时挂起）",
+}
+
+# RFC 5280 CRLReason 扩展码映射
+REASON_TO_RFC5280_CODE: dict[str, int] = {
+    "unspecified": 0,
+    "keyCompromise": 1,
+    "affiliationChanged": 3,
+    "superseded": 4,
+    "cessationOfOperation": 5,
+    "certificateHold": 6,
 }
 
 

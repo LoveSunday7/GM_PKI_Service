@@ -120,9 +120,17 @@ async def _do_generate_crl(db: AsyncSession) -> None:
     crl_entries: list[x509.RevokedCertificate] = []
     for entry in revoked_entries:
         try:
-            revoked_cert = x509.RevokedCertificateBuilder().serial_number(
+            builder = x509.RevokedCertificateBuilder().serial_number(
                 int(entry.cert_serial_number, 16) % (2 ** 128)
-            ).revocation_date(entry.revoked_at).build()
+            ).revocation_date(entry.revoked_at)
+            try:
+                from app.schemas.crl import REASON_TO_RFC5280_CODE
+                reason_str = getattr(entry, 'reason', 'unspecified') or 'unspecified'
+                flag = getattr(x509.ReasonFlags, reason_str, x509.ReasonFlags.unspecified)
+                builder = builder.add_extension(x509.CRLReason(flag), critical=False)
+            except Exception:
+                pass
+            revoked_cert = builder.build()
             crl_entries.append(revoked_cert)
         except (ValueError, TypeError):
             continue
@@ -197,11 +205,11 @@ async def revoke_certificate(
     cert = result.scalars().first()
     if cert is None:
         raise HTTPException(status_code=404, detail="证书未找到")
-    if cert.status == "revoked":
-        raise HTTPException(status_code=409, detail="证书已被撤销")
+    if cert.status in ("revoked", "suspended"):
+        raise HTTPException(status_code=409, detail=f"证书已被{cert.status}")
 
-    # 标记为已撤销
-    cert.status = "revoked"
+    # C003: certificateHold → suspended，其余 → revoked
+    cert.status = "suspended" if payload.reason == "certificateHold" else "revoked"
     now = datetime.now(timezone.utc)
 
     rev = CRLRevocation(
@@ -263,9 +271,17 @@ async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = 
     crl_entries: list[x509.RevokedCertificate] = []
     for entry in revoked_entries:
         try:
-            revoked_cert = x509.RevokedCertificateBuilder().serial_number(
+            builder = x509.RevokedCertificateBuilder().serial_number(
                 int(entry.cert_serial_number, 16) % (2**128)
-            ).revocation_date(entry.revoked_at).build()
+            ).revocation_date(entry.revoked_at)
+            try:
+                from app.schemas.crl import REASON_TO_RFC5280_CODE
+                reason_str = getattr(entry, 'reason', 'unspecified') or 'unspecified'
+                flag = getattr(x509.ReasonFlags, reason_str, x509.ReasonFlags.unspecified)
+                builder = builder.add_extension(x509.CRLReason(flag), critical=False)
+            except Exception:
+                pass
+            revoked_cert = builder.build()
             crl_entries.append(revoked_cert)
         except (ValueError, TypeError):
             continue
