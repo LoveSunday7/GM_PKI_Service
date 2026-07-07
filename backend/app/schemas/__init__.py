@@ -19,6 +19,8 @@ from app.schemas.cert import (
     CertApplyRequest,
     CertApplyResponse,
     CertApproveRequest,
+    CertChainNode,
+    CertChainResponse,
     CertDetailResponse,
     CertDownloadResponse,
     CertIssueRequest,
@@ -110,6 +112,8 @@ __all__ = [
     "CertApproveRequest",
     "CertRejectRequest",
     "CertReviewResponse",
+    "CertChainNode",
+    "CertChainResponse",
     # CRL
     "CRLRevokeRequest",
     "CRLRevokeResponse",

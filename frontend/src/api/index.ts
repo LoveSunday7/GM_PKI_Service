@@ -268,6 +268,9 @@ export const certApi = {
 
   reject: (id: string, reason: string) =>
     request<{ success: boolean; message: string; application_id: string }>(`/cert/applications/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+
+  chain: (serial: string) =>
+    request<{ chain: Array<{ serial_number: string; subject_dn: string; issuer_dn: string; cert_type: string; not_before: string; not_after: string; status: string; cert_pem: string }>; depth: number; verified: boolean }>(`/cert/${serial}/chain`),
 }
 
 // ═══════════════════════════════════════════════════════════════

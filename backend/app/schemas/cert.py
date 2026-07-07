@@ -182,3 +182,26 @@ class CertReviewResponse(BaseModel):
     message: str = Field(description="结果描述")
     application_id: str = Field(description="申请 UUID")
     issued_cert_serial: str | None = Field(default=None, description="签发的证书序列号（通过时）")
+
+
+# ── 证书链 ──────────────────────────────────────────
+
+class CertChainNode(BaseModel):
+    """证书链中的单个节点."""
+
+    serial_number: str = Field(description="证书序列号")
+    subject_dn: str = Field(description="主题 DN")
+    issuer_dn: str = Field(description="签发者 DN")
+    cert_type: str = Field(description="证书类型：root / sign / encrypt")
+    not_before: datetime = Field(description="生效时间")
+    not_after: datetime = Field(description="到期时间")
+    status: str = Field(description="证书状态")
+    cert_pem: str = Field(description="证书 PEM（截断）")
+
+
+class CertChainResponse(BaseModel):
+    """证书链响应."""
+
+    chain: list[CertChainNode] = Field(description="证书链节点（根→用户）")
+    depth: int = Field(description="链深度")
+    verified: bool = Field(description="链签名验证是否通过")

@@ -93,6 +93,7 @@ const form = ref({
 const selectedCert = ref<Record<string, unknown> | null>(null)
 const detailLoading = ref(false)
 const copiedField = ref('')
+const chainData = ref<{ chain: Array<Record<string, unknown>>; depth: number; verified: boolean } | null>(null)
 // 状态查询结果
 const certStatus = ref<{ status?: string; revoked_at?: string; reason?: string } | null>(null)
 
@@ -123,9 +124,16 @@ async function showDetail(serial: string) {
   detailLoading.value = true
   selectedCert.value = null
   certStatus.value = null
+  chainData.value = null
   try {
-    selectedCert.value = await certApi.detail(serial)
-    certStatus.value = await certApi.status(serial)
+    const [detail, status, chain] = await Promise.all([
+      certApi.detail(serial),
+      certApi.status(serial),
+      certApi.chain(serial).catch(() => null),
+    ])
+    selectedCert.value = detail
+    certStatus.value = status
+    chainData.value = chain
   } catch {
     selectedCert.value = null
   } finally {
@@ -136,6 +144,7 @@ async function showDetail(serial: string) {
 function closeDetail() {
   selectedCert.value = null
   certStatus.value = null
+  chainData.value = null
 }
 
 async function handleDownload(serial: string) {
@@ -362,6 +371,24 @@ async function copyText(text: string, field: string) {
           </dd>
           <dd v-else>—</dd>
         </dl>
+
+        <!-- B009: 证书链可视化 -->
+        <div v-if="chainData?.chain.length" class="chain-view">
+          <h4>🔗 证书链 <span v-if="chainData.verified" class="chain-ok">✅ 验证通过</span><span v-else class="chain-warn">⚠️ 验证失败</span></h4>
+          <div class="chain-cards">
+            <div v-for="(node, idx) in chainData.chain" :key="idx" class="chain-node">
+              <div class="chain-arrow" v-if="idx > 0">⬇️</div>
+              <div :class="['chain-card', node.cert_type === 'root' ? 'chain-root' : 'chain-user']">
+                <div class="chain-type">{{ node.cert_type === 'root' ? '🏛️ 根 CA' : node.cert_type === 'sign' ? '📜 签名证书' : '🔒 加密证书' }}</div>
+                <div class="chain-dn">{{ (node.subject_dn as string)?.slice(0, 50) }}...</div>
+                <div class="chain-meta">
+                  <code>{{ (node.serial_number as string)?.slice(0, 16) }}...</code>
+                  <span :class="['badge', node.status === 'active' ? 'badge-green' : 'badge-red']">{{ node.status }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
     </section>
   </div>
@@ -460,6 +487,20 @@ textarea { resize: vertical; font-family: monospace; }
 .pager button:hover:not(:disabled) { background: #0f3460; color: #fff; border-color: #0f3460; }
 .pager .page-btn.active { background: #0f3460; color: #fff; border-color: #0f3460; font-weight: 700; }
 .pager .page-dots { padding: 0 0.2rem; color: #666; font-weight: 500; }
+
+/* 证书链 */
+.chain-view { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #f0f0f0; }
+.chain-view h4 { font-size: 0.95rem; margin-bottom: 0.75rem; }
+.chain-ok { color: #28a745; font-weight: 600; }
+.chain-warn { color: #dc3545; font-weight: 600; }
+.chain-cards { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.chain-arrow { font-size: 1.2rem; color: #999; margin: 0.15rem 0; }
+.chain-card { background: #f8f9fa; border-radius: 10px; padding: 0.75rem 1rem; width: 100%; max-width: 400px; border-left: 4px solid #0f3460; }
+.chain-card.chain-root { border-left-color: #0f3460; }
+.chain-card.chain-user { border-left-color: #28a745; }
+.chain-type { font-weight: 700; font-size: 0.85rem; margin-bottom: 0.2rem; }
+.chain-dn { font-size: 0.78rem; color: #555; margin-bottom: 0.3rem; word-break: break-all; }
+.chain-meta { display: flex; gap: 0.5rem; align-items: center; font-size: 0.75rem; }
 button { padding: 0.6rem 1.5rem; background: #1a1a2e; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #555; }

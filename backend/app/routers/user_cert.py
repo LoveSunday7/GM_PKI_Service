@@ -21,6 +21,8 @@ from app.schemas.cert import (
     CertApplyRequest,
     CertApplyResponse,
     CertApproveRequest,
+    CertChainNode,
+    CertChainResponse,
     CertDetailResponse,
     CertDownloadResponse,
     CertIssueRequest,
@@ -503,3 +505,61 @@ async def reject_application(
         message=f"申请已拒绝（原因: {payload.reason}）",
         application_id=app_id,
     )
+
+
+@router.get("/{serial_number}/chain", response_model=CertChainResponse)
+async def get_cert_chain(
+    serial_number: str,
+    db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+) -> CertChainResponse:
+    """B008: 返回结构化证书链（根 CA → 用户证书，含各节点详情）."""
+    stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    result = await db.execute(stmt)
+    user_cert = result.scalars().first()
+    if user_cert is None:
+        raise HTTPException(status_code=404, detail="证书未找到")
+
+    # 查找签发此证书的根证书
+    root_stmt = select(RootCert).where(RootCert.serial_number == user_cert.root_cert_serial)
+    root_result = await db.execute(root_stmt)
+    root_cert = root_result.scalars().first()
+
+    chain: list[CertChainNode] = []
+
+    # 根 CA 节点
+    if root_cert:
+        chain.append(CertChainNode(
+            serial_number=root_cert.serial_number,
+            subject_dn=root_cert.subject_dn,
+            issuer_dn=root_cert.issuer_dn,
+            cert_type="root",
+            not_before=root_cert.not_before,
+            not_after=root_cert.not_after,
+            status=root_cert.status,
+            cert_pem=root_cert.cert_pem[:500] + "..." if len(root_cert.cert_pem) > 500 else root_cert.cert_pem,
+        ))
+
+    # 用户证书节点
+    chain.append(CertChainNode(
+        serial_number=user_cert.serial_number,
+        subject_dn=user_cert.subject_dn,
+        issuer_dn=user_cert.issuer_dn,
+        cert_type=user_cert.cert_type,
+        not_before=user_cert.not_before,
+        not_after=user_cert.not_after,
+        status=user_cert.status,
+        cert_pem=user_cert.cert_pem[:500] + "..." if len(user_cert.cert_pem) > 500 else user_cert.cert_pem,
+    ))
+
+    # 验证链签名
+    verified = False
+    if root_cert:
+        try:
+            from app.services.crypto import verify_cert_chain
+            v = verify_cert_chain(user_cert.cert_pem, root_cert.cert_pem)
+            verified = v.get("valid", False)
+        except Exception:
+            pass
+
+    return CertChainResponse(chain=chain, depth=len(chain), verified=verified)
