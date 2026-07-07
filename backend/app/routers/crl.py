@@ -153,6 +153,11 @@ async def _do_generate_crl(db: AsyncSession) -> None:
     crl = crl_builder.sign(ca_private_key, hashes.SHA256())
     crl_pem = crl.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
+    # C009: 标记已纳入此 CRL 的撤销记录
+    for entry in revoked_entries:
+        if entry.first_published_crl is None:
+            entry.first_published_crl = crl_number
+
     publish = CRLPublish(
         crl_number=crl_number,
         issuer_dn=root_cert.subject_dn,
@@ -324,6 +329,11 @@ async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = 
     crl = crl_builder.sign(ca_private_key, hashes.SHA256())
     crl_pem = crl.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
+    # C009: 标记已纳入此 CRL 的撤销记录
+    for entry in revoked_entries:
+        if entry.first_published_crl is None:
+            entry.first_published_crl = crl_number
+
     # 持久化 CRL 发布记录
     publish = CRLPublish(
         crl_number=crl_number,
@@ -371,6 +381,7 @@ async def get_current_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser
             "cert_serial_number": r.cert_serial_number,
             "reason": r.reason,
             "revoked_at": r.revoked_at.isoformat() if r.revoked_at else None,
+            "first_published_crl": r.first_published_crl,  # C009
         }
         for r in revs
     ]
@@ -419,6 +430,7 @@ async def get_current_crl_public(db: AsyncSession = Depends(get_db)):
             "cert_serial_number": r.cert_serial_number,
             "reason": r.reason,
             "revoked_at": r.revoked_at.isoformat() if r.revoked_at else None,
+            "first_published_crl": r.first_published_crl,  # C009
         }
         for r in revs
     ]

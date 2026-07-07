@@ -18,6 +18,8 @@ class CRLRevocation(Base):
     cert_serial_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     reason: Mapped[str] = mapped_column(String(128), nullable=False, default="unspecified")
     revoked_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # C009: 关联首次发布的 CRL
+    first_published_crl: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
