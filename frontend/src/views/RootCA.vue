@@ -313,6 +313,10 @@ async function handleDownload(serial: string) {
         <dd>{{ selectedCert.signature_algorithm }}</dd>
         <dt>密钥长度</dt>
         <dd>{{ selectedCert.key_size }} bit</dd>
+        <dt>证书文件</dt>
+        <dd><code>{{ selectedCert.cert_path || '—' }}</code></dd>
+        <dt>私钥文件</dt>
+        <dd><code>{{ selectedCert.key_path || '—' }}</code></dd>
         <dt>生效时间</dt>
         <dd>{{ selectedCert.not_before }}</dd>
         <dt>到期时间</dt>

@@ -147,12 +147,22 @@ async def get_root_cert_detail(
     serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
 ) -> RootCertDetailResponse:
     """根据序列号查询根证书详情."""
+    import os as _os
+
     stmt = select(RootCert).where(RootCert.serial_number == serial_number)
     result = await db.execute(stmt)
     cert = result.scalars().first()
     if cert is None:
         raise HTTPException(status_code=404, detail="根证书未找到")
-    return RootCertDetailResponse.model_validate(cert)
+
+    # 构造密钥库文件路径
+    cert_path = _os.path.join(settings.keystore_dir, f"root_{cert.serial_number}.pem")
+    key_path = _os.path.join(settings.keystore_dir, f"root_{cert.serial_number}.key")
+
+    resp = RootCertDetailResponse.model_validate(cert)
+    resp.cert_path = cert_path
+    resp.key_path = key_path
+    return resp
 
 
 @router.get("/root-cert/{serial_number}/download")

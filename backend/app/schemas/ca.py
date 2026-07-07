@@ -96,6 +96,8 @@ class RootCertDetailResponse(BaseModel):
     not_before: datetime = Field(description="生效时间")
     not_after: datetime = Field(description="到期时间")
     cert_pem: str = Field(description="证书 PEM 内容")
+    cert_path: str | None = Field(default=None, description="证书密钥库文件路径")
+    key_path: str | None = Field(default=None, description="私钥密钥库文件路径")
     key_size: int = Field(description="密钥长度（bit）")
     subject_key_identifier: str | None = Field(default=None, description="主题密钥标识符")
     authority_key_identifier: str | None = Field(default=None, description="授权密钥标识符")
