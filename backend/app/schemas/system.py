@@ -18,6 +18,8 @@ class SystemConfigResponse(BaseModel):
     database_type: str = Field(description="数据库类型（sqlite / mysql）")
     keystore_dir: str = Field(description="密钥库目录路径")
     log_level: str = Field(description="当前日志级别（DEBUG/INFO/WARNING/ERROR）")
+    ca_name: str = Field(description="CA 名称")
+    organization: str = Field(description="组织信息")
     ca_default_validity_days: int = Field(description="CA 根证书默认有效期（天）")
     cert_default_validity_days: int = Field(description="用户证书默认有效期（天）")
     crl_validity_hours: int = Field(description="CRL 有效期（小时）")
@@ -60,6 +62,30 @@ class KeystoreInfoResponse(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     """更新系统可动态修改的配置项（全部可选，仅更新提供的字段）."""
 
+    keystore_dir: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4096,
+        description="证书存储路径（密钥库目录）",
+    )
+    ca_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="CA 名称",
+    )
+    organization: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="组织信息",
+    )
+    default_signature_algorithm: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="默认签名算法",
+    )
     ca_default_validity_days: int | None = Field(
         default=None,
         ge=1,
@@ -86,9 +112,13 @@ class ConfigUpdateResponse(BaseModel):
     success: bool = Field(description="是否成功")
     message: str = Field(description="结果描述")
     updated_fields: list[str] = Field(description="已更新的配置项列表")
+    keystore_dir: str = Field(description="当前证书存储路径")
+    ca_name: str = Field(description="当前 CA 名称")
+    organization: str = Field(description="当前组织信息")
     ca_default_validity_days: int = Field(description="当前 CA 根证书默认有效期（天）")
     cert_default_validity_days: int = Field(description="当前用户证书默认有效期（天）")
     crl_validity_hours: int = Field(description="当前 CRL 有效期（小时）")
+    default_signature_algorithm: str = Field(description="当前默认签名算法")
 
 
 class DatabaseTableInfo(BaseModel):

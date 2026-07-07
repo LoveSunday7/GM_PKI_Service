@@ -34,6 +34,24 @@ const editForm = ref({
   crl_validity_hours: 0,
 })
 
+// ── CA 信息编辑 ───────────────────────────────────────────────
+const editingCaInfo = ref(false)
+const caInfoSaving = ref(false)
+const caInfoMsg = ref('')
+const caInfoForm = ref({
+  ca_name: '',
+  organization: '',
+  default_signature_algorithm: '',
+})
+
+// ── 密钥库路径编辑 ────────────────────────────────────────────
+const editingKeystore = ref(false)
+const keystoreSaving = ref(false)
+const keystoreMsg = ref('')
+const keystoreForm = ref({
+  keystore_dir: '',
+})
+
 // ── 加载数据 ───────────────────────────────────────────────────
 onMounted(async () => {
   try {
@@ -108,6 +126,80 @@ async function saveParams() {
   }
 }
 
+// ── CA 信息编辑 ───────────────────────────────────────────────
+function startEditCaInfo() {
+  if (!config.value) return
+  caInfoForm.value = {
+    ca_name: config.value.ca_name,
+    organization: config.value.organization,
+    default_signature_algorithm: config.value.default_signature_algorithm,
+  }
+  editingCaInfo.value = true
+}
+
+function cancelEditCaInfo() {
+  editingCaInfo.value = false
+  caInfoMsg.value = ''
+}
+
+async function saveCaInfo() {
+  caInfoSaving.value = true
+  caInfoMsg.value = ''
+  try {
+    const res = await systemApi.updateConfig({
+      ca_name: caInfoForm.value.ca_name,
+      organization: caInfoForm.value.organization,
+      default_signature_algorithm: caInfoForm.value.default_signature_algorithm,
+    })
+    if (config.value) {
+      config.value.ca_name = res.ca_name
+      config.value.organization = res.organization
+      config.value.default_signature_algorithm = res.default_signature_algorithm
+    }
+    caInfoMsg.value = res.message
+    editingCaInfo.value = false
+    setTimeout(() => { caInfoMsg.value = '' }, 3000)
+  } catch (e: unknown) {
+    caInfoMsg.value = e instanceof Error ? e.message : '保存失败'
+  } finally {
+    caInfoSaving.value = false
+  }
+}
+
+// ── 密钥库路径编辑 ────────────────────────────────────────────
+function startEditKeystore() {
+  if (!config.value) return
+  keystoreForm.value = {
+    keystore_dir: config.value.keystore_dir,
+  }
+  editingKeystore.value = true
+}
+
+function cancelEditKeystore() {
+  editingKeystore.value = false
+  keystoreMsg.value = ''
+}
+
+async function saveKeystore() {
+  keystoreSaving.value = true
+  keystoreMsg.value = ''
+  try {
+    const res = await systemApi.updateConfig({
+      keystore_dir: keystoreForm.value.keystore_dir,
+    })
+    if (config.value) {
+      config.value.keystore_dir = res.keystore_dir
+    }
+    keystoreMsg.value = res.message
+    editingKeystore.value = false
+    setTimeout(() => { keystoreMsg.value = '' }, 3000)
+  } catch (e: unknown) {
+    keystoreMsg.value = e instanceof Error ? e.message : '保存失败'
+  } finally {
+    keystoreSaving.value = false
+  }
+}
+
 // ── 日志查看 ───────────────────────────────────────────────────
 async function fetchLogs() {
   logLoading.value = true
@@ -161,11 +253,62 @@ function handleDownloadLogs() {
             <span class="info-label">数据库后端</span>
             <span class="info-value">{{ config.database_type.toUpperCase() }}</span>
           </div>
+        </div>
+      </section>
+
+      <!-- ── CA 信息卡片 ────────────────────────────────── -->
+      <section class="card">
+        <h3 class="card-title">🏢 CA 信息</h3>
+
+        <!-- 查看模式 -->
+        <div v-if="!editingCaInfo" class="info-grid">
+          <div class="info-item">
+            <span class="info-label">CA 名称</span>
+            <span class="info-value">{{ config.ca_name }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">组织信息</span>
+            <span class="info-value">{{ config.organization }}</span>
+          </div>
           <div class="info-item">
             <span class="info-label">签名算法</span>
             <span class="info-value"><code>{{ config.default_signature_algorithm }}</code></span>
           </div>
         </div>
+
+        <!-- 编辑模式 -->
+        <div v-else class="edit-form">
+          <div class="form-field">
+            <label>CA 名称</label>
+            <input v-model="caInfoForm.ca_name" maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label>组织信息</label>
+            <input v-model="caInfoForm.organization" maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label>签名算法</label>
+            <select v-model="caInfoForm.default_signature_algorithm">
+              <option>SM3WITHSM2</option>
+              <option>SHA256WITHRSA</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="param-actions">
+          <template v-if="!editingCaInfo">
+            <button class="btn btn-primary" @click="startEditCaInfo">✏️ 编辑</button>
+          </template>
+          <template v-else>
+            <button class="btn btn-primary" :disabled="caInfoSaving" @click="saveCaInfo">
+              {{ caInfoSaving ? '⏳ 保存中...' : '💾 保存' }}
+            </button>
+            <button class="btn btn-ghost" :disabled="caInfoSaving" @click="cancelEditCaInfo">取消</button>
+          </template>
+        </div>
+        <p v-if="caInfoMsg" class="msg" :class="{ 'msg-ok': caInfoMsg.includes('已更新'), 'msg-warn': !caInfoMsg.includes('已更新') }">
+          {{ caInfoMsg }}
+        </p>
       </section>
 
       <!-- ── 数据库信息卡片 ──────────────────────────────── -->
@@ -213,11 +356,35 @@ function handleDownloadLogs() {
       <!-- ── 密钥库信息卡片 ──────────────────────────────── -->
       <section class="card">
         <h3 class="card-title">🔑 密钥库信息</h3>
-        <div class="info-grid">
-          <div class="info-item info-wide">
-            <span class="info-label">存储路径</span>
-            <span class="info-value"><code>{{ keystoreInfo?.path || config.keystore_dir }}</code></span>
+
+        <!-- 存储路径（可编辑） -->
+        <div class="keystore-path-section">
+          <div class="info-grid">
+            <div class="info-item info-wide">
+              <span class="info-label">存储路径</span>
+              <template v-if="!editingKeystore">
+                <div class="keystore-path-row">
+                  <span class="info-value"><code>{{ keystoreInfo?.path || config.keystore_dir }}</code></span>
+                  <button class="btn btn-sm btn-primary" @click="startEditKeystore">✏️ 修改</button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="keystore-edit-row">
+                  <input v-model="keystoreForm.keystore_dir" class="keystore-input" />
+                  <button class="btn btn-sm btn-primary" :disabled="keystoreSaving" @click="saveKeystore">
+                    {{ keystoreSaving ? '⏳' : '💾' }}
+                  </button>
+                  <button class="btn btn-sm btn-ghost" :disabled="keystoreSaving" @click="cancelEditKeystore">取消</button>
+                </div>
+              </template>
+            </div>
           </div>
+          <p v-if="keystoreMsg" class="msg" :class="{ 'msg-ok': keystoreMsg.includes('已更新'), 'msg-warn': !keystoreMsg.includes('已更新') }">
+            {{ keystoreMsg }}
+          </p>
+        </div>
+
+        <div class="info-grid">
           <div class="info-item">
             <span class="info-label">文件数量</span>
             <span class="info-value">{{ keystoreInfo?.file_count ?? '-' }}</span>
@@ -636,5 +803,53 @@ function handleDownloadLogs() {
   font-style: italic;
   text-align: center;
   padding: 2rem;
+}
+
+/* ── 密钥库路径编辑 ──────────────────────────────────── */
+.keystore-path-section {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+.keystore-path-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.keystore-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.keystore-input {
+  flex: 1;
+  min-width: 250px;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.keystore-input:focus {
+  outline: none;
+  border-color: #0f3460;
+  box-shadow: 0 0 0 2px rgba(15, 52, 96, 0.15);
+}
+
+/* ── 表单 select 样式 ────────────────────────────────── */
+.edit-form select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  width: 100%;
+  background: #fff;
+  cursor: pointer;
+}
+.edit-form select:focus {
+  outline: none;
+  border-color: #0f3460;
+  box-shadow: 0 0 0 2px rgba(15, 52, 96, 0.15);
 }
 </style>

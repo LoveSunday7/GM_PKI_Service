@@ -7,11 +7,12 @@ import os
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import inspect, text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy import inspect, select, text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.config import settings
-from app.database import engine
+from app.database import engine, get_db
+from app.models.ca_config import CAConfig
 from app.routers.auth import CurrentUser, get_current_user
 from app.schemas.system import (
     ConfigUpdateRequest,
@@ -54,15 +55,28 @@ def _format_size(size_bytes: int) -> str:
 
 @router.get("/config", response_model=SystemConfigResponse)
 async def get_system_config(
+    db: AsyncSession = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ) -> SystemConfigResponse:
     """返回当前系统配置信息（需登录）."""
+    # 从数据库读取 CA 名称和组织信息（若已初始化）
+    ca_name = "GM-PKI-CA"
+    organization = "Default Org"
+    stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
+    result = await db.execute(stmt)
+    ca_config = result.scalars().first()
+    if ca_config:
+        ca_name = ca_config.ca_name
+        organization = ca_config.organization
+
     return SystemConfigResponse(
         app_name=settings.app_name,
         debug=settings.debug,
         database_type=_detect_database_type(settings.database_url),
         keystore_dir=settings.keystore_dir,
         log_level=settings.log_level,
+        ca_name=ca_name,
+        organization=organization,
         ca_default_validity_days=settings.ca_default_validity_days,
         cert_default_validity_days=settings.cert_default_validity_days,
         crl_validity_hours=settings.crl_validity_hours,
@@ -140,17 +154,63 @@ async def get_keystore_info(
     )
 
 
+async def _get_or_create_ca_config(db: AsyncSession) -> CAConfig:
+    """获取当前 CA 配置，若不存在则创建默认记录."""
+    stmt = select(CAConfig).where(CAConfig.is_initialized.is_(True))
+    result = await db.execute(stmt)
+    ca_config = result.scalars().first()
+    if ca_config is None:
+        ca_config = CAConfig(
+            ca_name="GM-PKI-CA",
+            organization="Default Org",
+            is_initialized=False,
+        )
+        db.add(ca_config)
+        await db.flush()
+    return ca_config
+
+
 @router.put("/config", response_model=ConfigUpdateResponse)
 async def update_system_config(
     payload: ConfigUpdateRequest,
+    db: AsyncSession = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ) -> ConfigUpdateResponse:
     """更新可动态修改的系统配置项（需登录）。
 
     仅更新请求中提供了的字段，未提供的字段保持不变。
-    可修改项：CA 默认有效期、证书默认有效期、CRL 有效期。
+    可修改项：证书存储路径、CA 名称、组织信息、签名算法、
+    CA 默认有效期、证书默认有效期、CRL 有效期。
     """
     updated_fields: list[str] = []
+
+    if payload.keystore_dir is not None:
+        old_val = settings.keystore_dir
+        new_dir = os.path.abspath(payload.keystore_dir)
+        settings.keystore_dir = new_dir
+        os.makedirs(new_dir, exist_ok=True)
+        logger.info("证书存储路径: %s → %s", old_val, new_dir)
+        updated_fields.append("keystore_dir")
+
+    if payload.ca_name is not None:
+        ca_config = await _get_or_create_ca_config(db)
+        old_val = ca_config.ca_name
+        ca_config.ca_name = payload.ca_name
+        logger.info("CA 名称: %s → %s", old_val, payload.ca_name)
+        updated_fields.append("ca_name")
+
+    if payload.organization is not None:
+        ca_config = await _get_or_create_ca_config(db)
+        old_val = ca_config.organization
+        ca_config.organization = payload.organization
+        logger.info("组织信息: %s → %s", old_val, payload.organization)
+        updated_fields.append("organization")
+
+    if payload.default_signature_algorithm is not None:
+        old_val = settings.default_signature_algorithm
+        settings.default_signature_algorithm = payload.default_signature_algorithm
+        logger.info("默认签名算法: %s → %s", old_val, payload.default_signature_algorithm)
+        updated_fields.append("default_signature_algorithm")
 
     if payload.ca_default_validity_days is not None:
         old_val = settings.ca_default_validity_days
@@ -170,6 +230,10 @@ async def update_system_config(
         logger.info("CRL 有效期: %s → %s 小时", old_val, payload.crl_validity_hours)
         updated_fields.append("crl_validity_hours")
 
+    # 读取数据库中最新的 CA 名称和组织信息
+    db_ca_name = (await _get_or_create_ca_config(db)).ca_name
+    db_organization = (await _get_or_create_ca_config(db)).organization
+
     message = (
         f"已更新 {len(updated_fields)} 项配置：" + ", ".join(updated_fields)
         if updated_fields
@@ -180,9 +244,13 @@ async def update_system_config(
         success=True,
         message=message,
         updated_fields=updated_fields,
+        keystore_dir=settings.keystore_dir,
+        ca_name=db_ca_name,
+        organization=db_organization,
         ca_default_validity_days=settings.ca_default_validity_days,
         cert_default_validity_days=settings.cert_default_validity_days,
         crl_validity_hours=settings.crl_validity_hours,
+        default_signature_algorithm=settings.default_signature_algorithm,
     )
 
 

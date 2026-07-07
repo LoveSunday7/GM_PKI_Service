@@ -289,6 +289,8 @@ export interface SystemConfig {
   database_type: string
   keystore_dir: string
   log_level: string
+  ca_name: string
+  organization: string
   ca_default_validity_days: number
   cert_default_validity_days: number
   crl_validity_hours: number
@@ -345,14 +347,18 @@ export const systemApi = {
       { method: 'PUT', body: JSON.stringify({ level }) },
     ),
 
-  updateConfig: (data: Partial<Pick<SystemConfig, 'ca_default_validity_days' | 'cert_default_validity_days' | 'crl_validity_hours'>>) =>
+  updateConfig: (data: Partial<Pick<SystemConfig, 'keystore_dir' | 'ca_name' | 'organization' | 'default_signature_algorithm' | 'ca_default_validity_days' | 'cert_default_validity_days' | 'crl_validity_hours'>>) =>
     request<{
       success: boolean
       message: string
       updated_fields: string[]
+      keystore_dir: string
+      ca_name: string
+      organization: string
       ca_default_validity_days: number
       cert_default_validity_days: number
       crl_validity_hours: number
+      default_signature_algorithm: string
     }>('/system/config', { method: 'PUT', body: JSON.stringify(data) }),
 }
 
