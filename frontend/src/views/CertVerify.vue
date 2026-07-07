@@ -65,6 +65,43 @@ async function loadCurrentCRL() {
     toast.error(formatError(e))
   }
 }
+
+// 综合验证：加载CRL + 签名验证 + 撤销验证
+async function verifyAll() {
+  if (!certPem.value.trim()) {
+    toast.error('请先粘贴待验证的证书 PEM')
+    return
+  }
+  loading.value = true
+  signResult.value = null
+  crlResult.value = null
+  try {
+    // 1. 加载当前 CRL
+    if (!crlPem.value.trim()) {
+      const data = await crlApi.current()
+      if ('crl_pem' in data) {
+        crlPem.value = data.crl_pem
+      }
+    }
+    // 2. 签名验证（需要签发者证书）
+    if (issuerCertPem.value.trim()) {
+      signResult.value = await certApi.verify(certPem.value, issuerCertPem.value)
+    }
+    // 3. CRL 撤销验证
+    if (crlPem.value.trim()) {
+      crlResult.value = await certApi.verifyRevocation(certPem.value, crlPem.value)
+    }
+    if (signResult.value || crlResult.value) {
+      toast.success('综合验证完成')
+    } else {
+      toast.error('未执行任何验证，请填写签发者证书或加载CRL')
+    }
+  } catch (e: unknown) {
+    toast.error(formatError(e))
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -74,13 +111,18 @@ async function loadCurrentCRL() {
     <!-- 证书输入 -->
     <section class="section">
       <h3>证书 PEM</h3>
-      <textarea v-model="certPem" rows="6" placeholder="粘贴待验证的证书 PEM（-----BEGIN CERTIFICATE----- ...）"></textarea>
+      <textarea v-model="certPem" rows="5" placeholder="粘贴待验证的证书 PEM（-----BEGIN CERTIFICATE----- ...）"></textarea>
+      <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button class="btn btn-primary" @click="verifyAll" :disabled="loading">
+          {{ loading ? '⏳ 验证中...' : '🔍 综合验证（签名+撤销）' }}
+        </button>
+      </div>
     </section>
 
     <!-- 签名链验证 -->
     <section class="section">
       <h3>签名链验证</h3>
-      <textarea v-model="issuerCertPem" rows="5" placeholder="粘贴上级/根证书 PEM..."></textarea>
+      <textarea v-model="issuerCertPem" rows="4" placeholder="粘贴上级/根证书 PEM..."></textarea>
       <button class="btn" @click="verifySignature" :disabled="loading" style="margin-top:0.75rem">
         {{ loading ? '验证中...' : '验证签名链' }}
       </button>

@@ -61,11 +61,35 @@ async def _run_migrations() -> None:
     logger.info("数据库迁移完成")
 
 
+async def _seed_default_admin() -> None:
+    """确保数据库中存在默认管理员账户 (admin / admin123)."""
+    import bcrypt
+    from sqlalchemy import select as sa_select
+
+    from app.database import async_session_factory
+    from app.models.admin_user import AdminUser
+
+    async with async_session_factory() as db:
+        stmt = sa_select(AdminUser).where(AdminUser.username == "admin")
+        result = await db.execute(stmt)
+        if result.scalars().first() is None:
+            pwd_hash = bcrypt.hashpw("admin123".encode(), bcrypt.gensalt()).decode()
+            admin = AdminUser(
+                username="admin",
+                password_hash=pwd_hash,
+                role="admin",
+            )
+            db.add(admin)
+            await db.commit()
+            logger.info("默认管理员账户已创建: admin / admin123")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动: 数据库迁移 + 密钥库目录 + CRL 自动签发；关闭: 释放引擎."""
+    """启动: 数据库迁移 + 密钥库目录 + 默认管理员 + CRL 自动签发；关闭: 释放引擎."""
     _ensure_keystore()
     await _run_migrations()
+    await _seed_default_admin()
 
     # 启动 CRL 自动签发任务
     from app.routers.crl import start_auto_crl, stop_auto_crl

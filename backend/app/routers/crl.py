@@ -399,15 +399,21 @@ async def get_current_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser
     )
 
 
-@router.get("/download", response_model=CRLDownloadResponse)
+@router.get("/download")
 async def download_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
-    """下载最新 CRL 文件."""
+    """下载最新 CRL 文件（PEM 格式）."""
+    from fastapi.responses import PlainTextResponse
+
     stmt = select(CRLPublish).order_by(CRLPublish.crl_number.desc()).limit(1)
     result = await db.execute(stmt)
     crl = result.scalars().first()
     if crl is None:
         raise HTTPException(status_code=404, detail="暂无 CRL 发布记录")
-    return CRLDownloadResponse(crl_pem=crl.crl_pem, filename=f"crl_{crl.crl_number}.crl")
+    return PlainTextResponse(
+        content=crl.crl_pem,
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": f'attachment; filename="crl_{crl.crl_number}.crl"'},
+    )
 
 
 # ── C004: 公开 CRL 端点（无需认证，供 CRL 分发点使用）─────────
@@ -448,15 +454,21 @@ async def get_current_crl_public(db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/public/download", response_model=CRLDownloadResponse)
+@router.get("/public/download")
 async def download_crl_public(db: AsyncSession = Depends(get_db)):
-    """公开下载 CRL — 无需认证（C004）."""
+    """公开下载 CRL — 无需认证（C004）（PEM 格式）."""
+    from fastapi.responses import PlainTextResponse
+
     stmt = select(CRLPublish).order_by(CRLPublish.crl_number.desc()).limit(1)
     result = await db.execute(stmt)
     crl = result.scalars().first()
     if crl is None:
         raise HTTPException(status_code=404, detail="暂无 CRL 发布记录")
-    return CRLDownloadResponse(crl_pem=crl.crl_pem, filename=f"crl_{crl.crl_number}.crl")
+    return PlainTextResponse(
+        content=crl.crl_pem,
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": f'attachment; filename="crl_{crl.crl_number}.crl"'},
+    )
 
 
 @router.get("/history", response_model=CRLHistoryResponse)

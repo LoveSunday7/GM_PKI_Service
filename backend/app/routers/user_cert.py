@@ -507,27 +507,32 @@ async def get_cert_detail(
     return CertDetailResponse.model_validate(cert)
 
 
-@router.get("/{serial_number}/download", response_model=CertDownloadResponse)
+@router.get("/{serial_number}/download")
 async def download_cert(
     serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
-) -> CertDownloadResponse:
-    """下载用户证书（PEM）及 CA 证书链."""
+):
+    """下载用户证书及 CA 证书链（PEM 文件）."""
+    from fastapi.responses import PlainTextResponse
+
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
     result = await db.execute(stmt)
     cert = result.scalars().first()
     if cert is None:
         raise HTTPException(status_code=404, detail="证书未找到")
 
-    # 同时获取根证书以组成证书链
+    # 获取根证书组成完整证书链
     root_stmt = select(RootCert).where(RootCert.serial_number == cert.root_cert_serial)
     root_result = await db.execute(root_stmt)
     root_cert = root_result.scalars().first()
 
-    return CertDownloadResponse(
-        cert_pem=cert.cert_pem,
-        key_pem=cert.key_pem,
-        root_cert_pem=root_cert.cert_pem if root_cert else None,
-        filename=f"{serial_number}.pem",
+    chain_pem = cert.cert_pem
+    if root_cert:
+        chain_pem += "\n" + root_cert.cert_pem
+
+    return PlainTextResponse(
+        content=chain_pem,
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": f'attachment; filename="{serial_number}.pem"'},
     )
 
 
