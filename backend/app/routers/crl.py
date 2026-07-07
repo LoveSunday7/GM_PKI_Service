@@ -230,10 +230,11 @@ async def revoke_certificate(
 
 
 @router.post("/generate", response_model=CRLGenerateResponse)
-async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CRLGenerateResponse:
+async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user), delta: bool = False) -> CRLGenerateResponse:
     """生成新的 CRL，由根 CA 私钥签名。
 
     收集所有待处理的撤销记录并签发 CRL。
+    delta=true 时生成增量 CRL（仅包含自上一基础 CRL 以来的变更）。
     """
     root_cert = await _get_active_root_cert(db)
 
@@ -302,6 +303,21 @@ async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = 
         )
     )
 
+    # C008: Delta CRL — 在添加条目之前附加 DeltaCRLIndicator 扩展
+    is_delta = False
+    base_crl_number = None
+    if delta:
+        base_stmt = select(CRLPublish).where(CRLPublish.is_delta == False).order_by(CRLPublish.crl_number.desc()).limit(1)
+        base_result = await db.execute(base_stmt)
+        base_crl = base_result.scalars().first()
+        if base_crl:
+            is_delta = True
+            base_crl_number = base_crl.crl_number
+            crl_builder = crl_builder.add_extension(
+                x509.DeltaCRLIndicator(base_crl.crl_number),
+                critical=True,
+            )
+
     for entry in crl_entries:
         crl_builder = crl_builder.add_revoked_certificate(entry)
 
@@ -317,13 +333,17 @@ async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = 
         signature_algorithm=root_cert.signature_algorithm,
         crl_pem=crl_pem,
         revoked_count=len(crl_entries),
+        is_delta=is_delta,
+        base_crl_number=base_crl_number,
     )
     db.add(publish)
     await db.flush()
 
+    msg = f"CRL #{crl_number}{' (增量, 基础 #' + str(base_crl_number) + ')' if is_delta else ''} 已生成，包含 {len(crl_entries)} 个撤销证书"
+
     return CRLGenerateResponse(
         success=True,
-        message=f"CRL #{crl_number} 已生成，包含 {len(crl_entries)} 个撤销证书",
+        message=msg,
         crl_number=crl_number,
         this_update=now,
         next_update=next_update,

@@ -32,4 +32,6 @@ class CRLPublish(Base):
     signature_algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
     crl_pem: Mapped[str] = mapped_column(Text, nullable=False)
     revoked_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_delta: Mapped[bool] = mapped_column(default=False, server_default="0")  # C008
+    base_crl_number: Mapped[int | None] = mapped_column(Integer, nullable=True)  # C008: delta CRL 引用的基础 CRL 编号
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
