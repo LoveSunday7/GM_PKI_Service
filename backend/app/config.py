@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 480  # 8 小时
 
+    # ── 默认管理员 ───────────────────────────────────────────────
+    default_admin_username: str = "admin"
+    default_admin_password: str = "admin123"
+    default_admin_role: str = "admin"
+
     # ── 日志 ──────────────────────────────────────────────────────
     log_level: str = "INFO"  # DEBUG / INFO / WARNING / ERROR
     log_dir: str = str(Path(__file__).resolve().parent.parent / "logs")

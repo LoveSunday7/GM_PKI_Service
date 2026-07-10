@@ -246,6 +246,9 @@ gm-pki-certificate-system/
 | `CA_DEFAULT_VALIDITY_DAYS` | `3650` | CA 根证书默认有效期 |
 | `CERT_DEFAULT_VALIDITY_DAYS` | `365` | 用户证书默认有效期 |
 | `CRL_VALIDITY_HOURS` | `24` | CRL 有效期 |
+| `DEFAULT_ADMIN_USERNAME` | `admin` | 首次启动自动创建的管理员用户名 |
+| `DEFAULT_ADMIN_PASSWORD` | `admin123` | 首次启动自动创建的管理员密码 |
+| `DEFAULT_ADMIN_ROLE` | `admin` | 首次启动自动创建的管理员角色 |
 
 MySQL 示例：
 

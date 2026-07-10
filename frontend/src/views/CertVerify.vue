@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { certApi, crlApi } from '@/api'
+import { certApi, crlApi, type CertRevocationVerifyResult, type CertVerifyResult } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { formatError } from '@/utils/errors'
 
@@ -12,23 +12,8 @@ const issuerCertPem = ref('')
 const crlPem = ref('')
 const loading = ref(false)
 
-const signResult = ref<{
-  valid?: boolean
-  details?: string
-  cert_subject?: string
-  issuer_subject?: string
-  serial_number?: string
-  not_before?: string
-  not_after?: string
-  in_validity_period?: boolean
-} | null>(null)
-
-const crlResult = ref<{
-  revoked?: boolean
-  reason?: string | null
-  revocation_date?: string | null
-  error?: string
-} | null>(null)
+const signResult = ref<CertVerifyResult | null>(null)
+const crlResult = ref<CertRevocationVerifyResult | null>(null)
 
 async function verifySignature() {
   if (!certPem.value.trim() || !issuerCertPem.value.trim()) {

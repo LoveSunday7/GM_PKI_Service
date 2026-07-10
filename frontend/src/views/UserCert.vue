@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { caApi, certApi, type CertListItem } from '@/api'
+import { caApi, certApi, type CertChainResponse, type CertDetail, type CertIssueResponse, type CertListItem } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { formatError } from '@/utils/errors'
 
@@ -16,10 +16,10 @@ const page = ref(1)
 const pageSize = ref(20)
 const filterType = ref('')
 const filterStatus = ref('')
-const selectedCert = ref<Record<string, unknown> | null>(null)
+const selectedCert = ref<CertDetail | null>(null)
 const certStatus = ref<{ status?: string; revoked_at?: string; reason?: string } | null>(null)
-const chainData = ref<{ chain: Array<Record<string, unknown>>; depth: number; verified: boolean } | null>(null)
-const issueResult = ref<Record<string, unknown> | null>(null)
+const chainData = ref<CertChainResponse | null>(null)
+const issueResult = ref<CertIssueResponse | null>(null)
 
 const form = ref({
   user_name: '',
@@ -238,8 +238,8 @@ function closeDetail() {
         <dt>有效期</dt><dd>{{ selectedCert.not_before }} 至 {{ selectedCert.not_after }}</dd>
         <dt>证书 PEM</dt>
         <dd>
-          <pre class="pem-preview">{{ (selectedCert.cert_pem as string)?.slice(0, 500) }}...</pre>
-          <button class="btn-copy" @click="copyText(selectedCert.cert_pem as string)">复制 PEM</button>
+          <pre class="pem-preview">{{ selectedCert.cert_pem.slice(0, 500) }}...</pre>
+          <button class="btn-copy" @click="copyText(selectedCert.cert_pem)">复制 PEM</button>
         </dd>
       </dl>
 
@@ -251,7 +251,7 @@ function closeDetail() {
               <div class="chain-type">{{ node.cert_type === 'root' ? '根 CA' : node.cert_type === 'sign' ? '签名证书' : '加密证书' }}</div>
               <div class="chain-dn">{{ node.subject_dn }}</div>
               <div class="chain-meta">
-                <code>{{ (node.serial_number as string).slice(0, 18) }}...</code>
+                <code>{{ node.serial_number.slice(0, 18) }}...</code>
                 <span :class="['badge', node.status === 'active' ? 'badge-green' : 'badge-red']">{{ node.status === 'active' ? '有效' : '已撤销' }}</span>
               </div>
             </div>

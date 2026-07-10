@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { certApi } from '@/api'
+import { certApi, type CertApplicationItem } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { formatError } from '@/utils/errors'
 
@@ -8,7 +8,7 @@ defineOptions({ name: 'CertAuditPage' })
 
 const toast = useToast()
 const loading = ref(true)
-const apps = ref<Array<Record<string, unknown>>>([])
+const apps = ref<CertApplicationItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const filterStatus = ref('pending')
@@ -29,7 +29,7 @@ async function loadApps(p = 1) {
     const params: { status?: string; page?: number; page_size?: number } = { page: p, page_size: 20 }
     if (filterStatus.value) params.status = filterStatus.value
     const res = await certApi.applications(params)
-    apps.value = res.items as unknown as Array<Record<string, unknown>>
+    apps.value = res.items
     total.value = res.total
     page.value = res.page
   } catch (e: unknown) {
@@ -98,21 +98,21 @@ async function handleReject() {
             <tr><th>时间</th><th>姓名</th><th>类型</th><th>天数</th><th>状态</th><th>提交人</th><th>操作</th></tr>
           </thead>
           <tbody>
-            <tr v-for="a in apps" :key="a.id as string">
-              <td>{{ new Date(a.created_at as string).toLocaleString() }}</td>
+            <tr v-for="a in apps" :key="a.id">
+              <td>{{ new Date(a.created_at).toLocaleString() }}</td>
               <td>{{ a.user_name }}</td>
               <td>{{ a.cert_type === 'sign' ? '签名' : '加密' }}</td>
               <td>{{ a.validity_days }} 天</td>
-              <td><span :class="['badge', 'badge-' + a.status]">{{ statusLabel(a.status as string) }}</span></td>
+              <td><span :class="['badge', 'badge-' + a.status]">{{ statusLabel(a.status) }}</span></td>
               <td>{{ a.applied_by }}</td>
               <td class="actions">
                 <template v-if="a.status === 'pending'">
-                  <button class="btn btn-sm btn-approve" :disabled="approving === a.id" @click="handleApprove(a.id as string)">
+                  <button class="btn btn-sm btn-approve" :disabled="approving === a.id" @click="handleApprove(a.id)">
                     {{ approving === a.id ? '签发中...' : '通过' }}
                   </button>
-                  <button class="btn btn-sm btn-reject" :disabled="approving === a.id" @click="openReject(a.id as string)">拒绝</button>
+                  <button class="btn btn-sm btn-reject" :disabled="approving === a.id" @click="openReject(a.id)">拒绝</button>
                 </template>
-                <span v-else-if="a.status === 'approved'" class="hint">签发: {{ (a.issued_cert_serial as string)?.slice(0, 12) }}...</span>
+                <span v-else-if="a.status === 'approved'" class="hint">签发: {{ a.issued_cert_serial?.slice(0, 12) || '-' }}...</span>
                 <span v-else class="hint">{{ a.reject_reason || '已拒绝' }}</span>
               </td>
             </tr>

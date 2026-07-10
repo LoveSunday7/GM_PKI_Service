@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { certApi } from '@/api'
+import { certApi, type CertApplicationItem } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { formatError } from '@/utils/errors'
 
@@ -9,7 +9,7 @@ defineOptions({ name: 'CertApplyPage' })
 const toast = useToast()
 const submitting = ref(false)
 const myAppsLoading = ref(true)
-const myApps = ref<Array<Record<string, unknown>>>([])
+const myApps = ref<CertApplicationItem[]>([])
 
 const form = ref({
   user_name: '',
@@ -26,7 +26,7 @@ async function loadMyApps() {
   myAppsLoading.value = true
   try {
     const res = await certApi.applications({ page_size: 50 })
-    myApps.value = res.items as unknown as Array<Record<string, unknown>>
+    myApps.value = res.items
   } catch {
     myApps.value = []
   } finally {
@@ -97,13 +97,13 @@ function statusLabel(s: string) {
             <tr><th>时间</th><th>姓名</th><th>类型</th><th>状态</th><th>审核人</th><th>结果</th></tr>
           </thead>
           <tbody>
-            <tr v-for="a in myApps" :key="a.id as string">
-              <td>{{ new Date(a.created_at as string).toLocaleString() }}</td>
+            <tr v-for="a in myApps" :key="a.id">
+              <td>{{ new Date(a.created_at).toLocaleString() }}</td>
               <td>{{ a.user_name }}</td>
               <td>{{ a.cert_type === 'sign' ? '签名' : '加密' }}</td>
-              <td><span :class="['badge', 'badge-' + a.status]">{{ statusLabel(a.status as string) }}</span></td>
+              <td><span :class="['badge', 'badge-' + a.status]">{{ statusLabel(a.status) }}</span></td>
               <td>{{ a.reviewed_by || '-' }}</td>
-              <td>{{ a.reject_reason || (a.issued_cert_serial ? `序列号 ${(a.issued_cert_serial as string).slice(0, 14)}...` : '-') }}</td>
+              <td>{{ a.reject_reason || (a.issued_cert_serial ? `序列号 ${a.issued_cert_serial.slice(0, 14)}...` : '-') }}</td>
             </tr>
           </tbody>
         </table>

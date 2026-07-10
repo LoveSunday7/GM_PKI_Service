@@ -60,35 +60,43 @@ async def _run_migrations() -> None:
     # alembic command.upgrade 是同步调用，内部 env.py 通过 asyncio.run() 执行异步迁移.
     # 在已有事件循环中需通过线程池隔离，避免 "cannot be called from a running event loop" 错误.
     await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+
     from app.database import Base
     import app.models  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("数据库迁移完成")
+    logger.info("数据库迁移与表结构同步完成")
 
 
 async def _seed_default_admin() -> None:
-    """确保数据库中存在默认管理员账户 (admin / admin123)."""
+    """确保数据库中存在可配置的默认管理员账户."""
     import bcrypt
     from sqlalchemy import select as sa_select
 
     from app.database import async_session_factory
     from app.models.admin_user import AdminUser
 
+    username = settings.default_admin_username.strip()
+    password = settings.default_admin_password
+    role = settings.default_admin_role.strip() or "admin"
+    if not username or not password:
+        logger.warning("默认管理员未创建: DEFAULT_ADMIN_USERNAME 或 DEFAULT_ADMIN_PASSWORD 为空")
+        return
+
     async with async_session_factory() as db:
-        stmt = sa_select(AdminUser).where(AdminUser.username == "admin")
+        stmt = sa_select(AdminUser).where(AdminUser.username == username)
         result = await db.execute(stmt)
         if result.scalars().first() is None:
-            pwd_hash = bcrypt.hashpw("admin123".encode(), bcrypt.gensalt()).decode()
+            pwd_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
             admin = AdminUser(
-                username="admin",
+                username=username,
                 password_hash=pwd_hash,
-                role="admin",
+                role=role,
             )
             db.add(admin)
             await db.commit()
-            logger.info("默认管理员账户已创建: admin / admin123")
+            logger.info("默认管理员账户已创建: %s", username)
 
 
 @asynccontextmanager

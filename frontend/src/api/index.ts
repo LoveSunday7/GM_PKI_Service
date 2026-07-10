@@ -38,15 +38,23 @@ function clearAuth() {
   localStorage.removeItem(USER_KEY)
 }
 
+function decodeJwtPayload(token: string): { exp?: number } | null {
+  const payload = token.split('.')[1]
+  if (!payload) return null
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    return JSON.parse(atob(padded)) as { exp?: number }
+  } catch {
+    return null
+  }
+}
+
 export function isTokenExpired(): boolean {
   const token = getToken()
   if (!token) return true
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1] || ''))
-    return !payload.exp || Date.now() >= payload.exp * 1000
-  } catch {
-    return true
-  }
+  const payload = decodeJwtPayload(token)
+  return !payload?.exp || Date.now() >= payload.exp * 1000
 }
 
 async function request<T>(url: string, options?: RequestInit & { timeout?: number }): Promise<T> {
@@ -154,9 +162,80 @@ export interface CertListItem {
   status: string
 }
 
+export interface CertDetail extends CertListItem {
+  issuer_dn: string
+  email?: string | null
+  signature_algorithm: string
+  not_before: string
+  cert_pem: string
+}
+
+export interface CertIssueResponse {
+  success: boolean
+  message: string
+  subject_dn?: string
+  root_dn?: string
+  sign_serial_number?: string
+  encrypt_serial_number?: string
+  serial_number?: string
+  cert_pem?: string
+  private_key_pem?: string
+}
+
+export interface CertApplicationItem {
+  id: string
+  user_name: string
+  email?: string | null
+  organization?: string | null
+  department?: string | null
+  cert_type: string
+  validity_days: number
+  status: string
+  reject_reason?: string | null
+  applied_by: string
+  reviewed_by?: string | null
+  issued_cert_serial?: string | null
+  created_at: string
+}
+
+export interface CertChainNode {
+  serial_number: string
+  subject_dn: string
+  issuer_dn: string
+  cert_type: string
+  not_before: string
+  not_after: string
+  status: string
+  cert_pem: string
+}
+
+export interface CertChainResponse {
+  chain: CertChainNode[]
+  depth: number
+  verified: boolean
+}
+
+export interface CertVerifyResult {
+  valid: boolean
+  details: string
+  cert_subject: string
+  issuer_subject: string
+  serial_number: string
+  not_before: string
+  not_after: string
+  in_validity_period: boolean
+}
+
+export interface CertRevocationVerifyResult {
+  revoked: boolean
+  reason: string | null
+  revocation_date: string | null
+  error?: string
+}
+
 export const certApi = {
   issue: (data: Record<string, unknown>) =>
-    request<Record<string, unknown>>('/cert/issue', { method: 'POST', body: JSON.stringify(data) }),
+    request<CertIssueResponse>('/cert/issue', { method: 'POST', body: JSON.stringify(data) }),
   list: (params?: { cert_type?: string; status?: string; page?: number; page_size?: number }) => {
     const qs = new URLSearchParams()
     if (params?.cert_type) qs.set('cert_type', params.cert_type)
@@ -168,7 +247,7 @@ export const certApi = {
       `/cert/list${q ? `?${q}` : ''}`,
     )
   },
-  detail: (serial: string) => request<Record<string, unknown>>(`/cert/${serial}`),
+  detail: (serial: string) => request<CertDetail>(`/cert/${serial}`),
   status: (serial: string) =>
     request<{ serial_number: string; status: string; revoked_at?: string; reason?: string }>(
       `/cert/${serial}/status`,
@@ -209,26 +288,9 @@ export const certApi = {
     if (params?.page) qs.set('page', String(params.page))
     if (params?.page_size) qs.set('page_size', String(params.page_size))
     const q = qs.toString()
-    return request<{
-      items: Array<{
-        id: string
-        user_name: string
-        email?: string
-        organization?: string
-        department?: string
-        cert_type: string
-        validity_days: number
-        status: string
-        reject_reason?: string
-        applied_by: string
-        reviewed_by?: string
-        issued_cert_serial?: string
-        created_at: string
-      }>
-      total: number
-      page: number
-      page_size: number
-    }>(`/cert/applications${q ? `?${q}` : ''}`)
+    return request<{ items: CertApplicationItem[]; total: number; page: number; page_size: number }>(
+      `/cert/applications${q ? `?${q}` : ''}`,
+    )
   },
   approve: (id: string) =>
     request<{ success: boolean; message: string; application_id: string; issued_cert_serial?: string }>(
@@ -241,36 +303,17 @@ export const certApi = {
       body: JSON.stringify({ reason }),
     }),
   chain: (serial: string) =>
-    request<{
-      chain: Array<{
-        serial_number: string
-        subject_dn: string
-        issuer_dn: string
-        cert_type: string
-        not_before: string
-        not_after: string
-        status: string
-        cert_pem: string
-      }>
-      depth: number
-      verified: boolean
-    }>(`/cert/${serial}/chain`),
+    request<CertChainResponse>(`/cert/${serial}/chain`),
   verify: (certPem: string, issuerCertPem: string) =>
-    request<{
-      valid: boolean
-      details: string
-      cert_subject: string
-      issuer_subject: string
-      serial_number: string
-      not_before: string
-      not_after: string
-      in_validity_period: boolean
-    }>('/cert/verify', { method: 'POST', body: JSON.stringify({ cert_pem: certPem, issuer_cert_pem: issuerCertPem }) }),
+    request<CertVerifyResult>('/cert/verify', {
+      method: 'POST',
+      body: JSON.stringify({ cert_pem: certPem, issuer_cert_pem: issuerCertPem }),
+    }),
   verifyRevocation: (certPem: string, crlPem: string) =>
-    request<{ revoked: boolean; reason: string | null; revocation_date: string | null; error?: string }>(
-      '/cert/verify-revocation',
-      { method: 'POST', body: JSON.stringify({ cert_pem: certPem, crl_pem: crlPem }) },
-    ),
+    request<CertRevocationVerifyResult>('/cert/verify-revocation', {
+      method: 'POST',
+      body: JSON.stringify({ cert_pem: certPem, crl_pem: crlPem }),
+    }),
 }
 
 export interface SystemConfig {
