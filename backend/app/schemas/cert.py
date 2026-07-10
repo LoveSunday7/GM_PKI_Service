@@ -6,6 +6,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+SIGNATURE_ALGORITHM_VALUES = ["SM3WITHSM2", "SHA256WITHECDSA", "SHA384WITHECDSA", "SHA512WITHECDSA"]
+ENCRYPTION_ALGORITHM_VALUES = ["SM2", "ECIES-SECP256R1"]
+
 
 class CertIssueRequest(BaseModel):
     """签发用户证书的请求体."""
@@ -16,15 +19,14 @@ class CertIssueRequest(BaseModel):
     department: str | None = Field(default=None, max_length=255, description="部门")
     province: str | None = Field(default=None, max_length=128, description="省份")
     city: str | None = Field(default=None, max_length=128, description="城市")
-    cert_type: str = Field(
-        default="sign",
-        pattern="^(sign|encrypt|both)$",
-        description="证书类型：sign=签名证书, encrypt=加密证书, both=双证书（签名+加密）",
-    )
+    cert_type: str = Field(default="both", pattern="^(both|intermediate_ca)$", description="证书类型：both=签名+加密双证书, intermediate_ca=中间 CA")
     validity_days: int = Field(default=365, ge=1, le=36500, description="证书有效期（天）")
     public_key_pem: str | None = Field(
         default=None, description="可选：PEM 格式公钥，不填则自动生成 SM2 密钥对"
     )
+    signature_algorithm: str = Field(default="SM3WITHSM2", description="签名算法")
+    encryption_algorithm: str = Field(default="SM2", description="加密证书算法")
+    issuer_cert_serial: str | None = Field(default=None, description="可选：中间 CA 序列号，不填则使用根 CA")
 
 
 class CertIssueResponse(BaseModel):
@@ -44,9 +46,11 @@ class CertIssueResponse(BaseModel):
     encrypt_public_key_pem: str | None = Field(default=None, description="加密证书公钥 PEM")
     encrypt_key_pem: str | None = Field(default=None, description="加密证书私钥 PEM（仅自动生成时返回）")
     # 共同字段
+    serial_number: str | None = Field(default=None, description="中间 CA 证书序列号")
     subject_dn: str | None = Field(default=None, description="用户主题 DN")
     root_dn: str | None = Field(default=None, description="根证书主题 DN")
     root_cert_pem: str | None = Field(default=None, description="根证书 PEM")
+    issuer_cert_serial: str | None = Field(default=None, description="实际签发者序列号")
 
 
 class CertListResponse(BaseModel):
@@ -87,6 +91,8 @@ class CertDetailResponse(BaseModel):
     subject_dn: str = Field(description="主题 DN")
     issuer_dn: str = Field(description="签发者 DN")
     root_cert_serial: str = Field(description="签发此证书的根证书序列号")
+    issuer_cert_serial: str | None = Field(default=None, description="直接签发者证书序列号")
+    owner_username: str | None = Field(default=None, description="证书所属登录账户")
     user_name: str = Field(description="用户名")
     email: str | None = Field(default=None, description="邮箱")
     organization: str | None = Field(default=None, description="组织")
@@ -94,6 +100,7 @@ class CertDetailResponse(BaseModel):
     province: str | None = Field(default=None, description="省份")
     city: str | None = Field(default=None, description="城市")
     signature_algorithm: str = Field(description="签名算法")
+    encryption_algorithm: str = Field(description="加密算法")
     not_before: datetime = Field(description="生效时间")
     not_after: datetime = Field(description="到期时间")
     cert_pem: str = Field(description="证书 PEM 内容")
@@ -119,6 +126,15 @@ class CertStatusResponse(BaseModel):
     reason: str | None = Field(default=None, description="撤销原因")
 
 
+class CertIssuerItem(BaseModel):
+    """可用于签发用户证书的 CA 项."""
+
+    serial_number: str = Field(description="签发者证书序列号")
+    subject_dn: str = Field(description="签发者主题 DN")
+    issuer_type: str = Field(description="root / intermediate_ca")
+    display_name: str = Field(description="页面显示名称")
+
+
 # ── 证书申请（RA 审核工作流）──────────────────────────────
 
 class CertApplyRequest(BaseModel):
@@ -130,9 +146,12 @@ class CertApplyRequest(BaseModel):
     department: str | None = Field(default=None, max_length=255, description="部门")
     province: str | None = Field(default=None, max_length=128, description="省份")
     city: str | None = Field(default=None, max_length=128, description="城市")
-    cert_type: str = Field(default="sign", pattern="^(sign|encrypt)$", description="证书类型")
+    cert_type: str = Field(default="both", pattern="^both$", description="证书类型：固定为签名+加密双证书")
     validity_days: int = Field(default=365, ge=1, le=36500, description="有效期（天）")
     public_key_pem: str | None = Field(default=None, description="可选：PEM 格式公钥")
+    signature_algorithm: str = Field(default="SM3WITHSM2", description="签名证书签名算法")
+    encryption_algorithm: str = Field(default="SM2", description="加密证书算法")
+    issuer_cert_serial: str | None = Field(default=None, description="可选：中间 CA 序列号，不填则使用根 CA")
 
 
 class CertApplyResponse(BaseModel):
@@ -160,6 +179,10 @@ class CertApplicationItem(BaseModel):
     applied_by: str = Field(description="提交人")
     reviewed_by: str | None = Field(default=None, description="审核人")
     issued_cert_serial: str | None = Field(default=None, description="签发的证书序列号")
+    issued_encrypt_cert_serial: str | None = Field(default=None, description="签发的加密证书序列号")
+    issuer_cert_serial: str | None = Field(default=None, description="选择的上级 CA 序列号")
+    signature_algorithm: str = Field(description="签名算法")
+    encryption_algorithm: str = Field(description="加密算法")
     created_at: datetime = Field(description="提交时间")
 
 
@@ -191,6 +214,7 @@ class CertReviewResponse(BaseModel):
     message: str = Field(description="结果描述")
     application_id: str = Field(description="申请 UUID")
     issued_cert_serial: str | None = Field(default=None, description="签发的证书序列号（通过时）")
+    issued_encrypt_cert_serial: str | None = Field(default=None, description="签发的加密证书序列号（通过时）")
 
 
 # ── 证书链 ──────────────────────────────────────────

@@ -24,6 +24,9 @@ class CertApplication(Base):
     cert_type: Mapped[str] = mapped_column(String(16), nullable=False, default="sign")
     validity_days: Mapped[int] = mapped_column(Integer, nullable=False, default=365)
     public_key_pem: Mapped[str | None] = mapped_column(Text)
+    signature_algorithm: Mapped[str] = mapped_column(String(64), nullable=False, default="SM3WITHSM2")
+    encryption_algorithm: Mapped[str] = mapped_column(String(64), nullable=False, default="SM2")
+    issuer_cert_serial: Mapped[str | None] = mapped_column(String(64))
 
     # 审核状态
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")  # pending / approved / rejected
@@ -35,6 +38,7 @@ class CertApplication(Base):
 
     # 签发结果
     issued_cert_serial: Mapped[str | None] = mapped_column(String(64))
+    issued_encrypt_cert_serial: Mapped[str | None] = mapped_column(String(64))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

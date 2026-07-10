@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.admin_user import AdminUser
-from app.routers.auth import CurrentUser, get_current_user, hash_password
+from app.routers.auth import CurrentUser, hash_password, require_admin
 from app.schemas.admin import (
     AdminUserListItem,
     ChangePasswordRequest,
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 async def create_admin_user(
     payload: CreateAdminUserRequest,
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(get_current_user),
+    _user: CurrentUser = Depends(require_admin),
 ) -> CreateAdminUserResponse:
     """创建新的管理员用户（需登录）."""
     # 检查用户名是否已存在
@@ -59,7 +59,7 @@ async def create_admin_user(
 @router.get("/users", response_model=list[AdminUserListItem])
 async def list_admin_users(
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(get_current_user),
+    _user: CurrentUser = Depends(require_admin),
 ) -> list[AdminUserListItem]:
     """查询管理员用户列表（需登录）."""
     stmt = select(AdminUser).order_by(AdminUser.created_at.desc())
@@ -72,7 +72,7 @@ async def list_admin_users(
 async def delete_admin_user(
     username: str,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> DeleteAdminUserResponse:
     """删除管理员用户（需登录，禁止删除自己）."""
     # 禁止删除自己
@@ -103,7 +103,7 @@ async def change_admin_password(
     username: str,
     payload: ChangePasswordRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ChangePasswordResponse:
     """修改管理员用户密码（需登录）."""
     # 查找用户

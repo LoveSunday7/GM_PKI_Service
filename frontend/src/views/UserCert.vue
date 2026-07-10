@@ -3,10 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import { caApi, certApi, type CertChainResponse, type CertDetail, type CertIssueResponse, type CertListItem } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { formatError } from '@/utils/errors'
+import { useAuthStore } from '@/stores/auth'
 
 defineOptions({ name: 'UserCertPage' })
 
 const toast = useToast()
+const authStore = useAuthStore()
 const caInitialized = ref(false)
 const loading = ref(false)
 const certLoading = ref(true)
@@ -16,6 +18,7 @@ const page = ref(1)
 const pageSize = ref(20)
 const filterType = ref('')
 const filterStatus = ref('')
+const serialQuery = ref('')
 const selectedCert = ref<CertDetail | null>(null)
 const certStatus = ref<{ status?: string; revoked_at?: string; reason?: string } | null>(null)
 const chainData = ref<CertChainResponse | null>(null)
@@ -28,12 +31,16 @@ const form = ref({
   department: '',
   province: '',
   city: '',
-  cert_type: 'sign',
+  cert_type: 'both',
   validity_days: 365,
   public_key_pem: '',
+  signature_algorithm: 'SM3WITHSM2',
+  encryption_algorithm: 'SM2',
+  issuer_cert_serial: '',
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const pageTitle = computed(() => (authStore.role === 'admin' ? '证书一览' : '我的证书'))
 
 async function loadCAStatus() {
   const status = await caApi.status()
@@ -72,6 +79,7 @@ async function handleIssue() {
   try {
     const payload: Record<string, unknown> = { ...form.value }
     if (!payload.public_key_pem) delete payload.public_key_pem
+    if (!payload.issuer_cert_serial) delete payload.issuer_cert_serial
     const res = await certApi.issue(payload)
     issueResult.value = res
     toast.success(String(res.message || '证书签发成功'))
@@ -101,6 +109,15 @@ async function showDetail(serial: string) {
   }
 }
 
+async function queryBySerial() {
+  const serial = serialQuery.value.trim()
+  if (!serial) {
+    toast.error('请输入证书序列号')
+    return
+  }
+  await showDetail(serial)
+}
+
 async function handleDownload(serial: string) {
   try {
     await certApi.download(serial)
@@ -123,35 +140,9 @@ function closeDetail() {
 
 <template>
   <div class="user-cert">
-    <h2>用户证书管理</h2>
+    <h2>{{ pageTitle }}</h2>
 
-    <section v-if="caInitialized" class="section">
-      <h3>签发新证书</h3>
-      <form class="form-grid" @submit.prevent="handleIssue">
-        <label>用户姓名 *<input v-model="form.user_name" required maxlength="128" placeholder="例如: 张三" /></label>
-        <label>邮箱<input v-model="form.email" type="email" maxlength="255" /></label>
-        <label>组织<input v-model="form.organization" maxlength="255" /></label>
-        <label>部门<input v-model="form.department" maxlength="255" /></label>
-        <label>省份<input v-model="form.province" maxlength="128" /></label>
-        <label>城市<input v-model="form.city" maxlength="128" /></label>
-        <label>证书类型
-          <select v-model="form.cert_type">
-            <option value="sign">签名证书</option>
-            <option value="encrypt">加密证书</option>
-            <option value="both">双证书(签名+加密)</option>
-          </select>
-        </label>
-        <label>有效期(天)<input v-model.number="form.validity_days" type="number" min="1" max="36500" /></label>
-        <label class="full-width">公钥 PEM(可选)
-          <textarea v-model="form.public_key_pem" rows="3" placeholder="不填写则自动生成密钥对"></textarea>
-        </label>
-        <div class="form-actions">
-          <button type="submit" :disabled="loading || !form.user_name">{{ loading ? '签发中...' : '签发证书' }}</button>
-        </div>
-      </form>
-    </section>
-
-    <section v-else class="section">
+    <section v-if="!caInitialized" class="section">
       <p class="warn">请先初始化 CA。</p>
     </section>
 
@@ -166,11 +157,15 @@ function closeDetail() {
         <div><span>用户 DN</span><strong>{{ issueResult.subject_dn }}</strong></div>
         <div><span>根 DN</span><strong>{{ issueResult.root_dn }}</strong></div>
       </div>
-      <p class="hint">证书 PEM、根证书和私钥已在响应中返回，可从证书详情或下载按钮查看证书链。</p>
+      <p class="hint">签名证书、加密证书 PEM 和私钥已在响应中返回，可从证书详情或下载按钮查看完整证书链。</p>
     </section>
 
     <section class="section">
-      <h3>已签发证书</h3>
+      <h3>{{ authStore.role === 'admin' ? '全部证书列表' : '我的证书列表' }}</h3>
+      <div class="serial-search">
+        <input v-model="serialQuery" placeholder="输入完整证书序列号查询详情" @keyup.enter="queryBySerial" />
+        <button @click="queryBySerial">查询</button>
+      </div>
       <div class="filter-bar">
         <label>类型
           <select v-model="filterType" @change="loadCerts(1)">
@@ -198,7 +193,7 @@ function closeDetail() {
           <tbody>
             <tr v-for="c in certs" :key="c.id">
               <td class="clickable" @click="showDetail(c.serial_number)"><code>{{ c.serial_number.slice(0, 14) }}...</code></td>
-              <td><span :class="['badge', c.cert_type === 'sign' ? 'badge-blue' : 'badge-purple']">{{ c.cert_type === 'sign' ? '签名' : '加密' }}</span></td>
+              <td><span :class="['badge', c.cert_type === 'sign' ? 'badge-blue' : c.cert_type === 'intermediate_ca' ? 'badge-green' : 'badge-purple']">{{ c.cert_type === 'sign' ? '签名' : c.cert_type === 'intermediate_ca' ? '中间 CA' : '加密' }}</span></td>
               <td class="clickable" @click="showDetail(c.serial_number)">{{ c.subject_dn }}</td>
               <td>{{ c.user_name }}</td>
               <td>{{ new Date(c.not_after).toLocaleDateString() }}</td>
@@ -229,12 +224,13 @@ function closeDetail() {
       </div>
       <dl class="detail-grid">
         <dt>序列号</dt><dd><code>{{ selectedCert.serial_number }}</code></dd>
-        <dt>证书类型</dt><dd>{{ selectedCert.cert_type === 'sign' ? '签名证书' : '加密证书' }}</dd>
+        <dt>证书类型</dt><dd>{{ selectedCert.cert_type === 'sign' ? '签名证书' : selectedCert.cert_type === 'intermediate_ca' ? '中间 CA' : '加密证书' }}</dd>
         <dt>主题 DN</dt><dd>{{ selectedCert.subject_dn }}</dd>
         <dt>签发者 DN</dt><dd>{{ selectedCert.issuer_dn }}</dd>
         <dt>用户</dt><dd>{{ selectedCert.user_name }}</dd>
         <dt>邮箱</dt><dd>{{ selectedCert.email || '-' }}</dd>
         <dt>签名算法</dt><dd>{{ selectedCert.signature_algorithm }}</dd>
+        <dt>加密算法</dt><dd>{{ selectedCert.encryption_algorithm }}</dd>
         <dt>有效期</dt><dd>{{ selectedCert.not_before }} 至 {{ selectedCert.not_after }}</dd>
         <dt>证书 PEM</dt>
         <dd>
@@ -248,7 +244,7 @@ function closeDetail() {
         <div class="chain-cards">
           <div v-for="(node, idx) in chainData.chain" :key="idx" class="chain-step">
             <div :class="['chain-card', node.cert_type === 'root' ? 'chain-root' : 'chain-user']">
-              <div class="chain-type">{{ node.cert_type === 'root' ? '根 CA' : node.cert_type === 'sign' ? '签名证书' : '加密证书' }}</div>
+              <div class="chain-type">{{ node.cert_type === 'root' ? '根 CA' : node.cert_type === 'intermediate_ca' ? '中间 CA' : node.cert_type === 'sign' ? '签名证书' : '加密证书' }}</div>
               <div class="chain-dn">{{ node.subject_dn }}</div>
               <div class="chain-meta">
                 <code>{{ node.serial_number.slice(0, 18) }}...</code>
@@ -279,6 +275,9 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-close { background: transparent; color: #666; border: 1px solid #ccc; padding: 0.35rem 0.75rem; }
 .filter-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
 .filter-bar label { flex-direction: row; align-items: center; margin: 0; }
+.serial-search { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.serial-search input { flex: 1; }
+.serial-search button { white-space: nowrap; }
 .filter-count, .hint, .loading, .empty-state { color: #888; font-size: 0.85rem; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #eee; font-size: 0.85rem; }

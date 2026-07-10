@@ -66,7 +66,38 @@ async def _run_migrations() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _sync_runtime_columns()
     logger.info("数据库迁移与表结构同步完成")
+
+
+async def _sync_runtime_columns() -> None:
+    """补齐演示环境中已有数据库缺失的新字段."""
+    from sqlalchemy import text
+
+    columns = {
+        "user_cert": {
+            "issuer_cert_serial": "VARCHAR(64)",
+            "owner_username": "VARCHAR(64)",
+            "encryption_algorithm": "VARCHAR(64) DEFAULT 'SM2' NOT NULL",
+        },
+        "cert_application": {
+            "signature_algorithm": "VARCHAR(64) DEFAULT 'SM3WITHSM2' NOT NULL",
+            "encryption_algorithm": "VARCHAR(64) DEFAULT 'SM2' NOT NULL",
+            "issuer_cert_serial": "VARCHAR(64)",
+            "issued_encrypt_cert_serial": "VARCHAR(64)",
+        },
+    }
+    async with engine.begin() as conn:
+        for table, wanted in columns.items():
+            if settings.database_url.startswith("sqlite"):
+                rows = await conn.execute(text(f"PRAGMA table_info({table})"))
+                existing = {row[1] for row in rows}
+            else:
+                rows = await conn.execute(text(f"SHOW COLUMNS FROM {table}"))
+                existing = {row[0] for row in rows}
+            for name, ddl in wanted.items():
+                if name not in existing:
+                    await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 async def _seed_default_admin() -> None:

@@ -59,6 +59,62 @@ class CRLRevokeResponse(BaseModel):
     revoked_at: datetime | None = Field(default=None, description="撤销时间")
 
 
+class RevocationApplyRequest(BaseModel):
+    """撤销申请请求体."""
+
+    cert_serial_number: str = Field(max_length=64, description="申请撤销的证书序列号")
+    reason: str = Field(default="unspecified", max_length=128, description="撤销原因")
+    description: str | None = Field(default=None, max_length=512, description="补充说明")
+
+
+class RevocationApplyResponse(BaseModel):
+    """撤销申请响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    application_id: str = Field(description="撤销申请 UUID")
+
+
+class RevocationApplicationItem(BaseModel):
+    """撤销申请列表项."""
+
+    model_config = {"from_attributes": True}
+
+    id: str = Field(description="申请 UUID")
+    cert_serial_number: str = Field(description="证书序列号")
+    reason: str = Field(description="撤销原因")
+    description: str | None = Field(default=None, description="补充说明")
+    status: str = Field(description="状态 pending/approved/rejected")
+    reject_reason: str | None = Field(default=None, description="拒绝原因")
+    applied_by: str = Field(description="提交人")
+    reviewed_by: str | None = Field(default=None, description="审核人")
+    created_at: datetime = Field(description="提交时间")
+
+
+class RevocationApplicationListResponse(BaseModel):
+    """撤销申请分页列表."""
+
+    items: list[RevocationApplicationItem] = Field(description="撤销申请列表")
+    total: int = Field(description="总数")
+    page: int = Field(description="页码")
+    page_size: int = Field(description="每页大小")
+
+
+class RevocationReviewRequest(BaseModel):
+    """撤销审核请求."""
+
+    reject_reason: str | None = Field(default=None, max_length=512, description="拒绝原因")
+
+
+class RevocationReviewResponse(BaseModel):
+    """撤销审核响应."""
+
+    success: bool = Field(description="是否成功")
+    message: str = Field(description="结果描述")
+    application_id: str = Field(description="申请 UUID")
+    cert_serial_number: str | None = Field(default=None, description="证书序列号")
+
+
 class CRLGenerateResponse(BaseModel):
     """CRL 生成成功响应."""
 

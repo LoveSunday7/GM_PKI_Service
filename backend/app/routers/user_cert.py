@@ -14,7 +14,7 @@ from app.models.cert_application import CertApplication
 from app.models.crl import CRLRevocation
 from app.models.root_cert import RootCert
 from app.models.user_cert import UserCert
-from app.routers.auth import CurrentUser, get_current_user
+from app.routers.auth import CurrentUser, get_current_user, require_admin
 from app.schemas.cert import (
     CertApplicationItem,
     CertApplicationListResponse,
@@ -27,6 +27,7 @@ from app.schemas.cert import (
     CertDownloadResponse,
     CertIssueRequest,
     CertIssueResponse,
+    CertIssuerItem,
     CertListItem,
     CertListResponse,
     CertRejectRequest,
@@ -44,6 +45,8 @@ from app.services.crypto import (
     build_user_cert,
     generate_serial_number,
     generate_sm2_keypair,
+    normalize_encryption_algorithm,
+    normalize_signature_algorithm,
     verify_cert_chain,
     verify_cert_against_crl,
 )
@@ -61,6 +64,28 @@ async def _get_active_root_cert(db: AsyncSession) -> RootCert:
     return cert
 
 
+async def _get_issuer_cert(db: AsyncSession, issuer_cert_serial: str | None) -> tuple[str, str, str, str, str]:
+    """返回 (issuer_serial, root_serial, subject_dn, cert_pem, key_pem)."""
+    if issuer_cert_serial:
+        root_stmt = select(RootCert).where(RootCert.serial_number == issuer_cert_serial)
+        root_result = await db.execute(root_stmt)
+        root = root_result.scalars().first()
+        if root:
+            return root.serial_number, root.serial_number, root.subject_dn, root.cert_pem, root.key_pem
+
+        stmt = select(UserCert).where(UserCert.serial_number == issuer_cert_serial)
+        result = await db.execute(stmt)
+        issuer = result.scalars().first()
+        if issuer is None:
+            raise HTTPException(status_code=404, detail="中间 CA 证书未找到")
+        if issuer.cert_type != "intermediate_ca" or not issuer.key_pem:
+            raise HTTPException(status_code=400, detail="指定证书不是可签发的中间 CA")
+        return issuer.serial_number, issuer.root_cert_serial, issuer.subject_dn, issuer.cert_pem, issuer.key_pem
+
+    root = await _get_active_root_cert(db)
+    return root.serial_number, root.serial_number, root.subject_dn, root.cert_pem, root.key_pem
+
+
 def _build_cert(
     user_name: str,
     organization: str | None,
@@ -71,7 +96,10 @@ def _build_cert(
     cert_type: str,
     validity_days: int,
     public_key_pem: str | None,
-    root_cert: RootCert,
+    issuer_cert_pem: str,
+    issuer_key_pem: str,
+    issuer_dn: str,
+    signature_algorithm: str,
 ) -> dict:
     """签发单张用户证书，返回 cert dict."""
     if public_key_pem:
@@ -92,32 +120,108 @@ def _build_cert(
     cert_pem = build_user_cert(
         subject_dn=subject_dn,
         public_key_pem=public_pem,
-        issuer_cert_pem=root_cert.cert_pem,
-        issuer_key_pem=root_cert.key_pem,
+        issuer_cert_pem=issuer_cert_pem,
+        issuer_key_pem=issuer_key_pem,
         cert_type=cert_type,
         validity_days=validity_days,
         serial_number=serial,
-        signature_algorithm=root_cert.signature_algorithm,
+        signature_algorithm=signature_algorithm,
     )
 
     return {
         "serial": serial,
         "subject_dn": subject_dn,
+        "issuer_dn": issuer_dn,
         "cert_pem": cert_pem,
         "public_key_pem": public_pem,
         "key_pem": private_pem,
     }
 
 
+async def _find_issuer_pem_for_cert(cert_pem: str, db: AsyncSession) -> str | None:
+    """根据证书 issuer DN 在库内寻找上级证书 PEM."""
+    from cryptography import x509
+
+    cert = x509.load_pem_x509_certificate(cert_pem.encode())
+
+    root_result = await db.execute(select(RootCert))
+    for root in root_result.scalars().all():
+        try:
+            if x509.load_pem_x509_certificate(root.cert_pem.encode()).subject == cert.issuer:
+                return root.cert_pem
+        except Exception:
+            continue
+
+    user_result = await db.execute(select(UserCert))
+    for issuer in user_result.scalars().all():
+        try:
+            if x509.load_pem_x509_certificate(issuer.cert_pem.encode()).subject == cert.issuer:
+                return issuer.cert_pem
+        except Exception:
+            continue
+    return None
+
+
+async def _build_chain_response(user_cert: UserCert, db: AsyncSession) -> CertChainResponse:
+    """按 issuer_cert_serial 向上追溯，返回根/中间 CA/用户证书链."""
+    nodes: list[CertChainNode] = []
+    current: UserCert | None = user_cert
+    seen: set[str] = set()
+
+    while current and current.serial_number not in seen:
+        seen.add(current.serial_number)
+        nodes.append(CertChainNode(
+            serial_number=current.serial_number,
+            subject_dn=current.subject_dn,
+            issuer_dn=current.issuer_dn,
+            cert_type=current.cert_type,
+            not_before=current.not_before,
+            not_after=current.not_after,
+            status=current.status,
+            cert_pem=current.cert_pem,
+        ))
+        parent_serial = current.issuer_cert_serial
+        if not parent_serial or parent_serial == current.root_cert_serial:
+            break
+        parent_result = await db.execute(select(UserCert).where(UserCert.serial_number == parent_serial))
+        current = parent_result.scalars().first()
+
+    root_stmt = select(RootCert).where(RootCert.serial_number == user_cert.root_cert_serial)
+    root_result = await db.execute(root_stmt)
+    root_cert = root_result.scalars().first()
+    if root_cert:
+        nodes.append(CertChainNode(
+            serial_number=root_cert.serial_number,
+            subject_dn=root_cert.subject_dn,
+            issuer_dn=root_cert.issuer_dn,
+            cert_type="root",
+            not_before=root_cert.not_before,
+            not_after=root_cert.not_after,
+            status=root_cert.status,
+            cert_pem=root_cert.cert_pem,
+        ))
+
+    nodes.reverse()
+    verified = True
+    for issuer, cert in zip(nodes, nodes[1:]):
+        result = verify_cert_chain(cert.cert_pem, issuer.cert_pem)
+        verified = verified and bool(result.get("valid"))
+    return CertChainResponse(chain=nodes, depth=len(nodes), verified=verified)
+
+
 @router.post("/issue", response_model=CertIssueResponse)
-async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)) -> CertIssueResponse:
-    """签发用户证书（支持单证书和双证书模式）."""
-    root_cert = await _get_active_root_cert(db)
+async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_admin)) -> CertIssueResponse:
+    """管理员签发证书：默认签名+加密双证书，也支持签发中间 CA."""
+    try:
+        signature_algorithm = normalize_signature_algorithm(payload.signature_algorithm)
+        encryption_algorithm = normalize_encryption_algorithm(payload.encryption_algorithm)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    issuer_serial, root_serial, issuer_dn, issuer_cert_pem, issuer_key_pem = await _get_issuer_cert(db, payload.issuer_cert_serial)
     now = datetime.now(timezone.utc)
 
-    cert_types: list[str] = (
-        ["sign", "encrypt"] if payload.cert_type == "both" else [payload.cert_type]
-    )
+    cert_types: list[str] = ["intermediate_ca"] if payload.cert_type == "intermediate_ca" else ["sign", "encrypt"]
 
     results: dict[str, dict] = {}
 
@@ -132,7 +236,10 @@ async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_d
             cert_type=ct,
             validity_days=payload.validity_days,
             public_key_pem=payload.public_key_pem if ct == "sign" else None,
-            root_cert=root_cert,
+            issuer_cert_pem=issuer_cert_pem,
+            issuer_key_pem=issuer_key_pem,
+            issuer_dn=issuer_dn,
+            signature_algorithm=signature_algorithm,
         )
         results[ct] = info
 
@@ -140,15 +247,18 @@ async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_d
             serial_number=info["serial"],
             cert_type=ct,
             subject_dn=info["subject_dn"],
-            issuer_dn=root_cert.subject_dn,
-            root_cert_serial=root_cert.serial_number,
+            issuer_dn=issuer_dn,
+            root_cert_serial=root_serial,
+            issuer_cert_serial=issuer_serial,
+            owner_username=payload.user_name if payload.cert_type != "intermediate_ca" else current_user.username,
             user_name=payload.user_name,
             email=payload.email,
             organization=payload.organization,
             department=payload.department,
             province=payload.province,
             city=payload.city,
-            signature_algorithm=root_cert.signature_algorithm,
+            signature_algorithm=signature_algorithm,
+            encryption_algorithm=encryption_algorithm,
             not_before=now,
             not_after=now + timedelta(days=payload.validity_days),
             cert_pem=info["cert_pem"],
@@ -162,12 +272,12 @@ async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_d
 
     sign = results.get("sign", {})
     encrypt = results.get("encrypt", {})
+    intermediate = results.get("intermediate_ca", {})
 
-    count = len(cert_types)
     return CertIssueResponse(
         success=True,
         error_code="SUCCESS",
-        message=f"用户证书签发成功（{'签名+加密' if count == 2 else '签名' if payload.cert_type == 'sign' else '加密'}）",
+        message="中间 CA 签发成功" if payload.cert_type == "intermediate_ca" else "用户双证书签发成功（签名+加密）",
         sign_serial_number=sign.get("serial"),
         sign_cert_pem=sign.get("cert_pem"),
         sign_public_key_pem=sign.get("public_key_pem"),
@@ -176,9 +286,11 @@ async def issue_cert(payload: CertIssueRequest, db: AsyncSession = Depends(get_d
         encrypt_cert_pem=encrypt.get("cert_pem") if encrypt else None,
         encrypt_public_key_pem=encrypt.get("public_key_pem") if encrypt else None,
         encrypt_key_pem=encrypt.get("key_pem") if encrypt else None,
-        subject_dn=sign.get("subject_dn") or encrypt.get("subject_dn"),
-        root_dn=root_cert.subject_dn,
-        root_cert_pem=root_cert.cert_pem,
+        serial_number=intermediate.get("serial"),
+        subject_dn=sign.get("subject_dn") or encrypt.get("subject_dn") or intermediate.get("subject_dn"),
+        root_dn=issuer_dn,
+        root_cert_pem=issuer_cert_pem,
+        issuer_cert_serial=issuer_serial,
     )
 
 
@@ -277,6 +389,8 @@ async def list_certs(
     """查询用户证书列表，支持分页及按类型、状态筛选."""
     # 构建基础查询
     base_stmt = select(UserCert)
+    if not _user.is_admin:
+        base_stmt = base_stmt.where(UserCert.owner_username == _user.username)
     if cert_type:
         base_stmt = base_stmt.where(UserCert.cert_type == cert_type)
     if status:
@@ -304,9 +418,41 @@ async def list_certs(
 
 
 @router.post("/verify", response_model=CertVerifyResponse)
-async def verify_certificate(payload: CertVerifyRequest, _user: CurrentUser = Depends(get_current_user)):
-    """验证证书签名链 — 传入证书 + 上级证书，返回验证结果."""
-    return verify_cert_chain(payload.cert_pem, payload.issuer_cert_pem)
+async def verify_certificate(
+    payload: CertVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """验证证书链：支持输入 PEM 或证书序列号；可返回完整证书链."""
+    cert_pem = payload.cert_pem
+    issuer_cert_pem = payload.issuer_cert_pem
+    chain_nodes: list[CertChainNode] = []
+
+    if payload.serial_number:
+        stmt = select(UserCert).where(UserCert.serial_number == payload.serial_number)
+        if not _user.is_admin:
+            stmt = stmt.where(UserCert.owner_username == _user.username)
+        result = await db.execute(stmt)
+        cert = result.scalars().first()
+        if cert is None:
+            raise HTTPException(status_code=404, detail="证书未找到")
+        cert_pem = cert.cert_pem
+        chain = await _build_chain_response(cert, db)
+        chain_nodes = chain.chain
+        if len(chain.chain) >= 2:
+            issuer_cert_pem = chain.chain[-2].cert_pem
+
+    if not cert_pem:
+        raise HTTPException(status_code=400, detail="请提供 cert_pem 或 serial_number")
+    if not issuer_cert_pem:
+        issuer_cert_pem = await _find_issuer_pem_for_cert(cert_pem, db)
+    if not issuer_cert_pem:
+        raise HTTPException(status_code=400, detail="未找到上级证书，请提供 issuer_cert_pem")
+
+    result = verify_cert_chain(cert_pem, issuer_cert_pem)
+    if payload.show_chain:
+        result["chain"] = [node.model_dump() for node in chain_nodes]
+    return result
 
 
 @router.post("/verify-revocation", response_model=CRLVerifyResponse)
@@ -335,6 +481,9 @@ async def apply_cert(
         cert_type=payload.cert_type,
         validity_days=payload.validity_days,
         public_key_pem=payload.public_key_pem,
+        signature_algorithm=payload.signature_algorithm,
+        encryption_algorithm=payload.encryption_algorithm,
+        issuer_cert_serial=payload.issuer_cert_serial,
         status="pending",
         applied_by=current_user.username,
     )
@@ -358,10 +507,12 @@ async def list_applications(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> CertApplicationListResponse:
-    """B003: 管理员查看申请列表（支持按状态过滤，分页）."""
+    """管理员查看全部申请；普通用户只查看自己提交的申请."""
     base_stmt = select(CertApplication)
+    if not current_user.is_admin:
+        base_stmt = base_stmt.where(CertApplication.applied_by == current_user.username)
     if status:
         base_stmt = base_stmt.where(CertApplication.status == status)
 
@@ -381,7 +532,7 @@ async def approve_application(
     app_id: str,
     payload: CertApproveRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CertReviewResponse:
     """B004: 管理员审核通过 — 自动触发证书签发."""
     stmt = select(CertApplication).where(CertApplication.id == app_id)
@@ -392,73 +543,106 @@ async def approve_application(
     if app.status != "pending":
         raise HTTPException(status_code=409, detail=f"申请已被{app.status}，无法重复审核")
 
-    # 自动签发证书
-    root_cert = await _get_active_root_cert(db)
+    try:
+        signature_algorithm = normalize_signature_algorithm(app.signature_algorithm)
+        encryption_algorithm = normalize_encryption_algorithm(app.encryption_algorithm)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    if app.public_key_pem:
-        public_pem = app.public_key_pem
-        private_pem = None
-    else:
-        public_pem, private_pem, _ = generate_sm2_keypair()
-
-    serial = generate_serial_number()
-    subject_dn = build_dn(
-        common_name=app.user_name,
-        organization=app.organization or "Default Org",
-        country="CN",
-        province=app.province,
-        city=app.city,
-    )
-
-    cert_pem = build_user_cert(
-        subject_dn=subject_dn,
-        public_key_pem=public_pem,
-        issuer_cert_pem=root_cert.cert_pem,
-        issuer_key_pem=root_cert.key_pem,
-        cert_type=app.cert_type,
-        validity_days=app.validity_days,
-        serial_number=serial,
-        signature_algorithm=root_cert.signature_algorithm,
-    )
-
+    issuer_serial, root_serial, issuer_dn, issuer_cert_pem, issuer_key_pem = await _get_issuer_cert(db, app.issuer_cert_serial)
     now = datetime.now(timezone.utc)
-    user_cert = UserCert(
-        serial_number=serial,
-        cert_type=app.cert_type,
-        subject_dn=subject_dn,
-        issuer_dn=root_cert.subject_dn,
-        root_cert_serial=root_cert.serial_number,
-        user_name=app.user_name,
-        email=app.email,
-        organization=app.organization,
-        department=app.department,
-        province=app.province,
-        city=app.city,
-        signature_algorithm=root_cert.signature_algorithm,
-        not_before=now,
-        not_after=now + timedelta(days=app.validity_days),
-        cert_pem=cert_pem,
-        key_pem=private_pem,
-        public_key_pem=public_pem,
-        status="active",
-    )
-    db.add(user_cert)
+    issued: dict[str, str] = {}
+    for cert_type in ("sign", "encrypt"):
+        info = _build_cert(
+            user_name=app.user_name,
+            organization=app.organization,
+            department=app.department,
+            province=app.province,
+            city=app.city,
+            email=app.email,
+            cert_type=cert_type,
+            validity_days=app.validity_days,
+            public_key_pem=app.public_key_pem if cert_type == "sign" else None,
+            issuer_cert_pem=issuer_cert_pem,
+            issuer_key_pem=issuer_key_pem,
+            issuer_dn=issuer_dn,
+            signature_algorithm=signature_algorithm,
+        )
+        db.add(UserCert(
+            serial_number=info["serial"],
+            cert_type=cert_type,
+            subject_dn=info["subject_dn"],
+            issuer_dn=issuer_dn,
+            root_cert_serial=root_serial,
+            issuer_cert_serial=issuer_serial,
+            owner_username=app.applied_by,
+            user_name=app.user_name,
+            email=app.email,
+            organization=app.organization,
+            department=app.department,
+            province=app.province,
+            city=app.city,
+            signature_algorithm=signature_algorithm,
+            encryption_algorithm=encryption_algorithm,
+            not_before=now,
+            not_after=now + timedelta(days=app.validity_days),
+            cert_pem=info["cert_pem"],
+            key_pem=info["key_pem"],
+            public_key_pem=info["public_key_pem"],
+            status="active",
+        ))
+        issued[cert_type] = info["serial"]
 
     app.status = "approved"
     app.reviewed_by = current_user.username
-    app.issued_cert_serial = serial
+    app.issued_cert_serial = issued.get("sign")
+    app.issued_encrypt_cert_serial = issued.get("encrypt")
     await db.flush()
 
     import logging
     logger = logging.getLogger(__name__)
-    logger.info("管理员 %s 批准了 %s 的证书申请 (serial=%s)", current_user.username, app.user_name, serial)
+    logger.info("管理员 %s 批准了 %s 的双证书申请 (sign=%s, encrypt=%s)", current_user.username, app.user_name, issued.get("sign"), issued.get("encrypt"))
 
     return CertReviewResponse(
         success=True,
-        message=f"申请已通过，证书已签发（序列号: {serial[:16]}...）",
+        message="申请已通过，签名证书和加密证书已签发",
         application_id=app_id,
-        issued_cert_serial=serial,
+        issued_cert_serial=issued.get("sign"),
+        issued_encrypt_cert_serial=issued.get("encrypt"),
     )
+
+
+@router.get("/issuers", response_model=list[CertIssuerItem])
+async def list_cert_issuers(
+    db: AsyncSession = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+) -> list[CertIssuerItem]:
+    """返回用户申请证书时可选择的签发机构：根 CA + 中间 CA."""
+    issuers: list[CertIssuerItem] = []
+
+    root_result = await db.execute(select(RootCert).where(RootCert.status == "active").order_by(RootCert.created_at.desc()))
+    for root in root_result.scalars().all():
+        issuers.append(CertIssuerItem(
+            serial_number=root.serial_number,
+            subject_dn=root.subject_dn,
+            issuer_type="root",
+            display_name=f"根 CA - {root.subject_dn}",
+        ))
+
+    intermediate_result = await db.execute(
+        select(UserCert)
+        .where(UserCert.cert_type == "intermediate_ca", UserCert.status == "active")
+        .order_by(UserCert.created_at.desc())
+    )
+    for ca in intermediate_result.scalars().all():
+        issuers.append(CertIssuerItem(
+            serial_number=ca.serial_number,
+            subject_dn=ca.subject_dn,
+            issuer_type="intermediate_ca",
+            display_name=f"中间 CA - {ca.subject_dn}",
+        ))
+
+    return issuers
 
 
 @router.post("/applications/{app_id}/reject", response_model=CertReviewResponse)
@@ -466,7 +650,7 @@ async def reject_application(
     app_id: str,
     payload: CertRejectRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CertReviewResponse:
     """B005: 管理员拒绝申请."""
     stmt = select(CertApplication).where(CertApplication.id == app_id)
@@ -496,10 +680,12 @@ async def reject_application(
 
 @router.get("/{serial_number}", response_model=CertDetailResponse)
 async def get_cert_detail(
-    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+    serial_number: str, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
 ) -> CertDetailResponse:
     """查询用户证书详细信息."""
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    if not current_user.is_admin:
+        stmt = stmt.where(UserCert.owner_username == current_user.username)
     result = await db.execute(stmt)
     cert = result.scalars().first()
     if cert is None:
@@ -509,25 +695,21 @@ async def get_cert_detail(
 
 @router.get("/{serial_number}/download")
 async def download_cert(
-    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+    serial_number: str, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
 ):
     """下载用户证书及 CA 证书链（PEM 文件）."""
     from fastapi.responses import PlainTextResponse
 
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    if not current_user.is_admin:
+        stmt = stmt.where(UserCert.owner_username == current_user.username)
     result = await db.execute(stmt)
     cert = result.scalars().first()
     if cert is None:
         raise HTTPException(status_code=404, detail="证书未找到")
 
-    # 获取根证书组成完整证书链
-    root_stmt = select(RootCert).where(RootCert.serial_number == cert.root_cert_serial)
-    root_result = await db.execute(root_stmt)
-    root_cert = root_result.scalars().first()
-
-    chain_pem = cert.cert_pem
-    if root_cert:
-        chain_pem += "\n" + root_cert.cert_pem
+    chain = await _build_chain_response(cert, db)
+    chain_pem = "\n".join(node.cert_pem for node in reversed(chain.chain))
 
     return PlainTextResponse(
         content=chain_pem,
@@ -538,10 +720,12 @@ async def download_cert(
 
 @router.get("/{serial_number}/status", response_model=CertStatusResponse)
 async def check_cert_status(
-    serial_number: str, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+    serial_number: str, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
 ) -> CertStatusResponse:
     """查询证书的撤销状态."""
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    if not current_user.is_admin:
+        stmt = stmt.where(UserCert.owner_username == current_user.username)
     result = await db.execute(stmt)
     cert = result.scalars().first()
     if cert is None:
@@ -565,55 +749,15 @@ async def check_cert_status(
 async def get_cert_chain(
     serial_number: str,
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> CertChainResponse:
-    """B008: 返回结构化证书链（根 CA → 用户证书，含各节点详情）."""
+    """返回结构化证书链（根 CA → 中间 CA → 用户证书，含各节点详情）."""
     stmt = select(UserCert).where(UserCert.serial_number == serial_number)
+    if not current_user.is_admin:
+        stmt = stmt.where(UserCert.owner_username == current_user.username)
     result = await db.execute(stmt)
     user_cert = result.scalars().first()
     if user_cert is None:
         raise HTTPException(status_code=404, detail="证书未找到")
 
-    # 查找签发此证书的根证书
-    root_stmt = select(RootCert).where(RootCert.serial_number == user_cert.root_cert_serial)
-    root_result = await db.execute(root_stmt)
-    root_cert = root_result.scalars().first()
-
-    chain: list[CertChainNode] = []
-
-    # 根 CA 节点
-    if root_cert:
-        chain.append(CertChainNode(
-            serial_number=root_cert.serial_number,
-            subject_dn=root_cert.subject_dn,
-            issuer_dn=root_cert.issuer_dn,
-            cert_type="root",
-            not_before=root_cert.not_before,
-            not_after=root_cert.not_after,
-            status=root_cert.status,
-            cert_pem=root_cert.cert_pem,
-        ))
-
-    # 用户证书节点
-    chain.append(CertChainNode(
-        serial_number=user_cert.serial_number,
-        subject_dn=user_cert.subject_dn,
-        issuer_dn=user_cert.issuer_dn,
-        cert_type=user_cert.cert_type,
-        not_before=user_cert.not_before,
-        not_after=user_cert.not_after,
-        status=user_cert.status,
-        cert_pem=user_cert.cert_pem,
-    ))
-
-    # 验证链签名
-    verified = False
-    if root_cert:
-        try:
-            from app.services.crypto import verify_cert_chain
-            v = verify_cert_chain(user_cert.cert_pem, root_cert.cert_pem)
-            verified = v.get("valid", False)
-        except Exception:
-            pass
-
-    return CertChainResponse(chain=chain, depth=len(chain), verified=verified)
+    return await _build_chain_response(user_cert, db)

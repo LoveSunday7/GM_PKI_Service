@@ -31,6 +31,10 @@ class CurrentUser:
     username: str
     role: str
 
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -63,6 +67,13 @@ async def get_current_user(
             raise HTTPException(status_code=401, detail="Token 已登出，请重新登录")
 
     return CurrentUser(username=username, role=role)
+
+
+def require_admin(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """限制仅管理员角色可访问."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="仅管理员账户可执行该操作")
+    return current_user
 
 
 def create_access_token(data: dict) -> tuple[str, str]:

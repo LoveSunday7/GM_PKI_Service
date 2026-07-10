@@ -16,7 +16,7 @@ const users = ref<AdminUserItem[]>([])
 
 // ── 创建表单 ───────────────────────────────────────────────────
 const creating = ref(false)
-const createForm = ref({ username: '', password: '', role: 'admin' })
+const createForm = ref({ username: '', password: '', role: 'user' })
 const createError = ref('')
 
 // ── 删除确认 ───────────────────────────────────────────────────
@@ -53,7 +53,7 @@ async function handleCreate() {
       role: createForm.value.role,
     })
     toast.success(res.message)
-    createForm.value = { username: '', password: '', role: 'admin' }
+    createForm.value = { username: '', password: '', role: 'user' }
     await loadUsers()
   } catch (e: unknown) {
     createError.value = formatError(e)
@@ -106,11 +106,11 @@ async function handleChangePwd() {
 
 <template>
   <div class="admin-users">
-    <h2>👥 管理员</h2>
+    <h2>账户管理</h2>
 
     <!-- ── 新增管理员表单 ──────────────────────────────────── -->
     <section class="card">
-      <h3 class="card-title">➕ 新增管理员</h3>
+      <h3 class="card-title">新增账户</h3>
       <div class="create-form">
         <div class="form-row">
           <label>
@@ -124,9 +124,8 @@ async function handleChangePwd() {
           <label>
             <span>角色</span>
             <select v-model="createForm.role">
-              <option value="admin">admin</option>
-              <option value="auditor">auditor</option>
-              <option value="operator">operator</option>
+              <option value="user">普通用户</option>
+              <option value="admin">管理员</option>
             </select>
           </label>
           <button class="btn btn-primary" :disabled="creating || !createForm.username || !createForm.password" @click="handleCreate">
@@ -188,8 +187,8 @@ async function handleChangePwd() {
       </template>
       <div v-else class="empty-state">
         <div class="empty-icon">👥</div>
-        <div class="empty-title">暂无管理员用户</div>
-        <div class="empty-hint">请在上方填写信息创建第一个管理员账户</div>
+        <div class="empty-title">暂无账户</div>
+        <div class="empty-hint">请在上方填写信息创建账户</div>
       </div>
     </section>
 
@@ -292,6 +291,7 @@ async function handleChangePwd() {
   font-weight: 600;
 }
 .badge-admin { background: #d4edda; color: #155724; }
+.badge-user { background: #e2e3e5; color: #343a40; }
 .badge-auditor { background: #d1ecf1; color: #0c5460; }
 .badge-operator { background: #fff3cd; color: #856404; }
 

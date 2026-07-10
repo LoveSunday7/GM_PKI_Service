@@ -26,6 +26,8 @@ from cryptography.x509.oid import NameOID
 # ═══════════════════════════════════════════════════════════════════
 
 SM2_SM3_OID = x509.ObjectIdentifier("1.2.156.10197.1.501")  # SM2-with-SM3 签名
+SUPPORTED_SIGNATURE_ALGORITHMS = ("SM3WITHSM2", "SHA256WITHECDSA", "SHA384WITHECDSA", "SHA512WITHECDSA")
+SUPPORTED_ENCRYPTION_ALGORITHMS = ("SM2", "ECIES-SECP256R1")
 
 # ecPublicKey OID + secp256r1 OID（用于 SPKI 序列化 [SM2 ≈ SECP256R1 参数兼容]）
 _EC_PUBLIC_KEY_OID_DER = bytes.fromhex("06072A8648CE3D0201")      # 1.2.840.10045.2.1
@@ -214,6 +216,36 @@ def generate_sm2_keypair() -> tuple[str, str, str]:
     return public_pem, private_pem, priv_hex
 
 
+def normalize_signature_algorithm(value: str | None) -> str:
+    alg = (value or "SM3WITHSM2").upper().replace("-", "")
+    aliases = {
+        "SM2SM3": "SM3WITHSM2",
+        "SHA256ECDSA": "SHA256WITHECDSA",
+        "SHA384ECDSA": "SHA384WITHECDSA",
+        "SHA512ECDSA": "SHA512WITHECDSA",
+    }
+    alg = aliases.get(alg, alg)
+    if alg not in SUPPORTED_SIGNATURE_ALGORITHMS:
+        raise ValueError(f"不支持的签名算法: {value}")
+    return alg
+
+
+def normalize_encryption_algorithm(value: str | None) -> str:
+    alg = (value or "SM2").upper()
+    if alg not in SUPPORTED_ENCRYPTION_ALGORITHMS:
+        raise ValueError(f"不支持的加密算法: {value}")
+    return alg
+
+
+def _hash_for_signature_algorithm(signature_algorithm: str):
+    alg = normalize_signature_algorithm(signature_algorithm)
+    if alg == "SHA384WITHECDSA":
+        return hashes.SHA384()
+    if alg == "SHA512WITHECDSA":
+        return hashes.SHA512()
+    return hashes.SHA256()
+
+
 # ──────────────────────────────────────────────────────────────────
 # SM3 哈希
 # ──────────────────────────────────────────────────────────────────
@@ -330,18 +362,26 @@ def build_self_signed_root_cert(
     public_key = serialization.load_pem_public_key(public_key_pem.encode())
 
     cn_value, org_value, country_value = "Test-CA", "Default Org", "CN"
+    st_value, l_value = "", ""
     for part in subject_dn.split(", "):
         if "=" in part:
             k, v = part.split("=", 1)
             if k == "CN": cn_value = v
             elif k == "O": org_value = v
             elif k == "C": country_value = v
+            elif k == "ST": st_value = v
+            elif k == "L": l_value = v
 
-    subject = x509.Name([
+    attrs = [
         x509.NameAttribute(NameOID.COUNTRY_NAME, country_value),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, org_value),
         x509.NameAttribute(NameOID.COMMON_NAME, cn_value),
-    ])
+    ]
+    if st_value:
+        attrs.insert(1, x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, st_value))
+    if l_value:
+        attrs.insert(1, x509.NameAttribute(NameOID.LOCALITY_NAME, l_value))
+    subject = x509.Name(attrs)
 
     builder = (
         x509.CertificateBuilder()
@@ -373,12 +413,13 @@ def build_self_signed_root_cert(
     except Exception:
         pass  # CDP 非关键，失败不影响签发
 
+    signature_algorithm = normalize_signature_algorithm(signature_algorithm)
     if signature_algorithm == "SM3WITHSM2":
         key_hex = _load_private_key_hex(private_key_pem)
         return _sm2_sign_certificate(builder, private_key_pem, key_hex)
 
     key = serialization.load_pem_private_key(private_key_pem.encode(), password=None)
-    cert = builder.sign(key, hashes.SHA256())
+    cert = builder.sign(key, _hash_for_signature_algorithm(signature_algorithm))
     return cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
 
@@ -399,30 +440,49 @@ def build_user_cert(
     user_pub = serialization.load_pem_public_key(public_key_pem.encode())
 
     cn_value, org_value, country_value = "User", "Default Org", "CN"
+    st_value, l_value = "", ""
     for part in subject_dn.split(", "):
         if "=" in part:
             k, v = part.split("=", 1)
             if k == "CN": cn_value = v
             elif k == "O": org_value = v
             elif k == "C": country_value = v
+            elif k == "ST": st_value = v
+            elif k == "L": l_value = v
 
-    subject = x509.Name([
+    attrs = [
         x509.NameAttribute(NameOID.COUNTRY_NAME, country_value),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, org_value),
         x509.NameAttribute(NameOID.COMMON_NAME, cn_value),
-    ])
+    ]
+    if st_value:
+        attrs.insert(1, x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, st_value))
+    if l_value:
+        attrs.insert(1, x509.NameAttribute(NameOID.LOCALITY_NAME, l_value))
+    subject = x509.Name(attrs)
 
-    ku = (
-        x509.KeyUsage(digital_signature=True, content_commitment=True,
-                       key_cert_sign=False, crl_sign=False,
-                       key_encipherment=False, data_encipherment=False,
-                       key_agreement=False, encipher_only=False, decipher_only=False)
-        if cert_type == "sign" else
-        x509.KeyUsage(digital_signature=False, content_commitment=False,
-                       key_cert_sign=False, crl_sign=False,
-                       key_encipherment=True, data_encipherment=True,
-                       key_agreement=True, encipher_only=False, decipher_only=False)
-    )
+    is_ca_cert = cert_type == "intermediate_ca"
+    if is_ca_cert:
+        ku = x509.KeyUsage(
+            digital_signature=True, content_commitment=False,
+            key_cert_sign=True, crl_sign=True,
+            key_encipherment=False, data_encipherment=False,
+            key_agreement=False, encipher_only=False, decipher_only=False,
+        )
+    elif cert_type == "sign":
+        ku = x509.KeyUsage(
+            digital_signature=True, content_commitment=True,
+            key_cert_sign=False, crl_sign=False,
+            key_encipherment=False, data_encipherment=False,
+            key_agreement=False, encipher_only=False, decipher_only=False,
+        )
+    else:
+        ku = x509.KeyUsage(
+            digital_signature=False, content_commitment=False,
+            key_cert_sign=False, crl_sign=False,
+            key_encipherment=True, data_encipherment=True,
+            key_agreement=True, encipher_only=False, decipher_only=False,
+        )
 
     builder = (
         x509.CertificateBuilder()
@@ -431,7 +491,7 @@ def build_user_cert(
         .serial_number(int(sn, 16) % (2 ** 128))
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=validity_days))
-        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.BasicConstraints(ca=is_ca_cert, path_length=0 if is_ca_cert else None), critical=True)
         .add_extension(ku, critical=True)
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(user_pub), critical=False)
@@ -450,12 +510,13 @@ def build_user_cert(
     except Exception:
         pass
 
+    signature_algorithm = normalize_signature_algorithm(signature_algorithm)
     if signature_algorithm == "SM3WITHSM2":
         ca_priv_hex = _load_private_key_hex(issuer_key_pem)
         return _sm2_sign_certificate(builder, issuer_key_pem, ca_priv_hex)
 
     ca_key = serialization.load_pem_private_key(issuer_key_pem.encode(), password=None)
-    cert = builder.sign(ca_key, hashes.SHA256())
+    cert = builder.sign(ca_key, _hash_for_signature_algorithm(signature_algorithm))
     return cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
 
@@ -613,15 +674,19 @@ def verify_cert_chain(cert_pem: str, issuer_cert_pem: str) -> dict:
         if cert.signature_algorithm_oid == SM2_SM3_OID:
             signature_note = "SM2/SM3 证书已完成链结构校验"
         else:
-            issuer.public_key().verify(
-                cert.signature,
-                cert.tbs_certificate_bytes,
-                ec.ECDSA(hashes.SHA256()),
-            )
-            signature_checked = True
-            signature_note = "证书签名有效"
+            sig_hash = cert.signature_hash_algorithm or hashes.SHA256()
+            try:
+                issuer.public_key().verify(
+                    cert.signature,
+                    cert.tbs_certificate_bytes,
+                    ec.ECDSA(sig_hash),
+                )
+                signature_checked = True
+                signature_note = "证书签名有效"
+            except Exception as exc:
+                signature_note = f"证书签名验证失败: {type(exc).__name__}: {exc}"
 
-        valid = issuer_matches and issuer_is_ca and in_period and issuer_in_period
+        valid = issuer_matches and issuer_is_ca and in_period and issuer_in_period and (signature_checked or cert.signature_algorithm_oid == SM2_SM3_OID)
         details = (
             signature_note
             + ("，签发者匹配" if issuer_matches else "，签发者不匹配")

@@ -13,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.crl import CRLPublish, CRLRevocation
+from app.models.revocation_application import RevocationApplication
 from app.models.root_cert import RootCert
 from app.models.user_cert import UserCert
-from app.routers.auth import CurrentUser, get_current_user
+from app.routers.auth import CurrentUser, get_current_user, require_admin
 from app.schemas.crl import (
     CRLDownloadResponse,
     CRLGenerateResponse,
@@ -24,10 +25,36 @@ from app.schemas.crl import (
     CRLQueryResponse,
     CRLRevokeRequest,
     CRLRevokeResponse,
+    RevocationApplicationItem,
+    RevocationApplicationListResponse,
+    RevocationApplyRequest,
+    RevocationApplyResponse,
+    RevocationReviewRequest,
+    RevocationReviewResponse,
 )
 
 router = APIRouter(prefix="/api/crl", tags=["CRL"])
 logger = logging.getLogger(__name__)
+
+
+async def _perform_revoke(
+    db: AsyncSession,
+    cert: UserCert,
+    reason: str,
+) -> tuple[CRLRevocation, datetime]:
+    """执行真实撤销：更新证书状态并写入 CRL 撤销记录."""
+    if cert.status in ("revoked", "suspended"):
+        raise HTTPException(status_code=409, detail=f"证书已被{cert.status}")
+
+    cert.status = "suspended" if reason == "certificateHold" else "revoked"
+    now = datetime.now(timezone.utc)
+    rev = CRLRevocation(
+        cert_serial_number=cert.serial_number,
+        reason=reason,
+        revoked_at=now,
+    )
+    db.add(rev)
+    return rev, now
 
 # ── CRL 自动签发后台任务 ──────────────────────────────────────
 
@@ -198,9 +225,9 @@ async def _get_active_root_cert(db: AsyncSession) -> RootCert:
 
 @router.post("/revoke", response_model=CRLRevokeResponse)
 async def revoke_certificate(
-    payload: CRLRevokeRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)
+    payload: CRLRevokeRequest, db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(require_admin)
 ) -> CRLRevokeResponse:
-    """登记证书撤销申请。
+    """管理员直接撤销证书。
 
     被撤销的证书将在下次 CRL 生成时体现。
     """
@@ -210,19 +237,8 @@ async def revoke_certificate(
     cert = result.scalars().first()
     if cert is None:
         raise HTTPException(status_code=404, detail="证书未找到")
-    if cert.status in ("revoked", "suspended"):
-        raise HTTPException(status_code=409, detail=f"证书已被{cert.status}")
 
-    # C003: certificateHold → suspended，其余 → revoked
-    cert.status = "suspended" if payload.reason == "certificateHold" else "revoked"
-    now = datetime.now(timezone.utc)
-
-    rev = CRLRevocation(
-        cert_serial_number=payload.cert_serial_number,
-        reason=payload.reason,
-        revoked_at=now,
-    )
-    db.add(rev)
+    _, now = await _perform_revoke(db, cert, payload.reason)
     await db.flush()
 
     return CRLRevokeResponse(
@@ -234,8 +250,128 @@ async def revoke_certificate(
     )
 
 
+@router.post("/revoke-applications", response_model=RevocationApplyResponse)
+async def apply_revocation(
+    payload: RevocationApplyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> RevocationApplyResponse:
+    """用户提交证书撤销申请，管理员审核后才真实撤销."""
+    stmt = select(UserCert).where(UserCert.serial_number == payload.cert_serial_number)
+    if not current_user.is_admin:
+        stmt = stmt.where(UserCert.owner_username == current_user.username)
+    result = await db.execute(stmt)
+    cert = result.scalars().first()
+    if cert is None:
+        raise HTTPException(status_code=404, detail="证书未找到")
+    if cert.status in ("revoked", "suspended"):
+        raise HTTPException(status_code=409, detail=f"证书已被{cert.status}")
+
+    pending_stmt = select(RevocationApplication).where(
+        RevocationApplication.cert_serial_number == payload.cert_serial_number,
+        RevocationApplication.status == "pending",
+    )
+    pending = (await db.execute(pending_stmt)).scalars().first()
+    if pending is not None:
+        raise HTTPException(status_code=409, detail="该证书已有待审核的撤销申请")
+
+    app = RevocationApplication(
+        cert_serial_number=payload.cert_serial_number,
+        reason=payload.reason,
+        description=payload.description,
+        applied_by=current_user.username,
+        status="pending",
+    )
+    db.add(app)
+    await db.flush()
+    return RevocationApplyResponse(success=True, message="撤销申请已提交，等待管理员审核", application_id=app.id)
+
+
+@router.get("/revoke-applications", response_model=RevocationApplicationListResponse)
+async def list_revocation_applications(
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> RevocationApplicationListResponse:
+    """管理员查看全部撤销申请；普通用户只查看自己提交的申请."""
+    base_stmt = select(RevocationApplication)
+    if not current_user.is_admin:
+        base_stmt = base_stmt.where(RevocationApplication.applied_by == current_user.username)
+    if status:
+        base_stmt = base_stmt.where(RevocationApplication.status == status)
+
+    count_stmt = select(sqlfunc.count()).select_from(base_stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+    offset = (page - 1) * page_size
+    stmt = base_stmt.order_by(RevocationApplication.created_at.desc()).offset(offset).limit(page_size)
+    result = await db.execute(stmt)
+    items = [RevocationApplicationItem.model_validate(a) for a in result.scalars().all()]
+    return RevocationApplicationListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/revoke-applications/{app_id}/approve", response_model=RevocationReviewResponse)
+async def approve_revocation_application(
+    app_id: str,
+    _payload: RevocationReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin),
+) -> RevocationReviewResponse:
+    """管理员批准撤销申请，真实撤销证书."""
+    stmt = select(RevocationApplication).where(RevocationApplication.id == app_id)
+    app = (await db.execute(stmt)).scalars().first()
+    if app is None:
+        raise HTTPException(status_code=404, detail="撤销申请未找到")
+    if app.status != "pending":
+        raise HTTPException(status_code=409, detail=f"申请已被{app.status}，无法重复审核")
+
+    cert = (await db.execute(select(UserCert).where(UserCert.serial_number == app.cert_serial_number))).scalars().first()
+    if cert is None:
+        raise HTTPException(status_code=404, detail="证书未找到")
+    await _perform_revoke(db, cert, app.reason)
+    app.status = "approved"
+    app.reviewed_by = current_user.username
+    await db.flush()
+    return RevocationReviewResponse(
+        success=True,
+        message="撤销申请已通过，证书已撤销",
+        application_id=app.id,
+        cert_serial_number=app.cert_serial_number,
+    )
+
+
+@router.post("/revoke-applications/{app_id}/reject", response_model=RevocationReviewResponse)
+async def reject_revocation_application(
+    app_id: str,
+    payload: RevocationReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin),
+) -> RevocationReviewResponse:
+    """管理员拒绝撤销申请."""
+    stmt = select(RevocationApplication).where(RevocationApplication.id == app_id)
+    app = (await db.execute(stmt)).scalars().first()
+    if app is None:
+        raise HTTPException(status_code=404, detail="撤销申请未找到")
+    if app.status != "pending":
+        raise HTTPException(status_code=409, detail=f"申请已被{app.status}，无法重复审核")
+    if not payload.reject_reason:
+        raise HTTPException(status_code=400, detail="请填写拒绝原因")
+
+    app.status = "rejected"
+    app.reject_reason = payload.reject_reason
+    app.reviewed_by = current_user.username
+    await db.flush()
+    return RevocationReviewResponse(
+        success=True,
+        message=f"撤销申请已拒绝（原因: {payload.reject_reason}）",
+        application_id=app.id,
+        cert_serial_number=app.cert_serial_number,
+    )
+
+
 @router.post("/generate", response_model=CRLGenerateResponse)
-async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user), delta: bool = False) -> CRLGenerateResponse:
+async def generate_crl(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(require_admin), delta: bool = False) -> CRLGenerateResponse:
     """生成新的 CRL，由根 CA 私钥签名。
 
     收集所有待处理的撤销记录并签发 CRL。
@@ -476,7 +612,7 @@ async def get_crl_history(
     page: int = 1,
     page_size: int = 10,
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(get_current_user),
+    _user: CurrentUser = Depends(require_admin),
 ) -> CRLHistoryResponse:
     """返回 CRL 发布历史列表，支持分页（需登录）."""
     # 总数

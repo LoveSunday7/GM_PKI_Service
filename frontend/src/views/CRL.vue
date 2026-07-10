@@ -3,11 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useCRLStore } from '@/stores/crl'
 import { useCAStore } from '@/stores/ca'
 import { useCertStore } from '@/stores/cert'
-import { crlApi } from '@/api'
+import { crlApi, type RevocationApplicationItem } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { formatError } from '@/utils/errors'
+import { useAuthStore } from '@/stores/auth'
 
 const toast = useToast()
+const authStore = useAuthStore()
 const crlStore = useCRLStore()
 const caStore = useCAStore()
 const certStore = useCertStore()
@@ -33,6 +35,8 @@ const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyLoading = ref(false)
 const PAGE_SIZE = 10
+const revokeApplications = ref<RevocationApplicationItem[]>([])
+const revokeAppsLoading = ref(false)
 
 async function loadHistory(page = 1) {
   historyLoading.value = true
@@ -43,6 +47,15 @@ async function loadHistory(page = 1) {
     historyPage.value = res.page
   } catch { /* ignore */ }
   finally { historyLoading.value = false }
+}
+
+async function loadRevocationApplications() {
+  revokeAppsLoading.value = true
+  try {
+    const res = await crlApi.revocationApplications({ page_size: 50 })
+    revokeApplications.value = res.items
+  } catch { /* ignore */ }
+  finally { revokeAppsLoading.value = false }
 }
 
 // ── 序列号自动补全 ─────────────────────────────────────────────
@@ -84,22 +97,29 @@ const reasonLabels: Record<string, string> = {
 const revokeForm = ref({
   cert_serial_number: '',
   reason: 'unspecified',
+  description: '',
 })
 
 onMounted(async () => {
   await caStore.fetchStatus()
-  await Promise.all([crlStore.fetchCurrent(), certStore.fetchList(), loadHistory()])
+  if (authStore.role === 'admin') {
+    await Promise.all([crlStore.fetchCurrent(), certStore.fetchList(), loadHistory()])
+  } else {
+    await Promise.all([certStore.fetchList(), loadRevocationApplications()])
+  }
 })
 
 async function handleRevoke() {
   loading.value = true
   try {
-    const res = await crlStore.revoke(revokeForm.value)
-    const revokeRes = res as { cert_serial_number?: string }
-    toast.success(`撤销成功: ${revokeRes.cert_serial_number?.slice(0, 20)}...`)
-    revokeForm.value.cert_serial_number = ''
+    const res = authStore.role === 'admin'
+      ? await crlStore.revoke(revokeForm.value)
+      : await crlStore.applyRevocation(revokeForm.value)
+    toast.success(res.message)
+    revokeForm.value = { cert_serial_number: '', reason: 'unspecified', description: '' }
     await certStore.fetchList()
-    await crlStore.fetchCurrent()
+    if (authStore.role === 'admin') await crlStore.fetchCurrent()
+    else await loadRevocationApplications()
   } catch (e: unknown) {
     toast.error(formatError(e))
   } finally {
@@ -147,11 +167,11 @@ async function copyCRLPEM(pem: string) {
 
 <template>
   <div class="crl">
-    <h2>证书撤销列表 (CRL)</h2>
+    <h2>{{ authStore.role === 'admin' ? 'CRL 管理' : '证书撤销申请' }}</h2>
 
     <!-- 撤销表单 -->
     <section class="section" v-if="caStore.initialized">
-      <h3>撤销证书</h3>
+      <h3>{{ authStore.role === 'admin' ? '管理员直接撤销' : '提交撤销申请' }}</h3>
       <form @submit.prevent="handleRevoke" class="form-row">
         <label class="autocomplete-wrapper">
           证书序列号
@@ -187,12 +207,39 @@ async function copyCRLPEM(pem: string) {
             <option value="certificateHold">证书冻结（临时挂起）</option>
           </select>
         </label>
-        <button type="submit" :disabled="loading">{{ loading ? '...' : '撤销' }}</button>
+        <label class="full-width">
+          补充说明
+          <input v-model="revokeForm.description" maxlength="512" placeholder="可填写密钥泄露、人员离职等说明" />
+        </label>
+        <button type="submit" :disabled="loading">{{ loading ? '...' : authStore.role === 'admin' ? '直接撤销' : '提交申请' }}</button>
       </form>
     </section>
 
+    <section class="section" v-if="authStore.role !== 'admin'">
+      <h3>我的撤销申请</h3>
+      <div v-if="revokeAppsLoading" class="loading">加载中...</div>
+      <div v-else-if="revokeApplications.length" class="responsive-table">
+        <table>
+          <thead>
+            <tr><th>时间</th><th>证书序列号</th><th>原因</th><th>状态</th><th>审核人</th><th>结果</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in revokeApplications" :key="a.id">
+              <td>{{ new Date(a.created_at).toLocaleString() }}</td>
+              <td><code>{{ a.cert_serial_number.slice(0, 20) }}...</code></td>
+              <td>{{ reasonLabels[a.reason] || a.reason }}</td>
+              <td><span :class="['badge', 'badge-' + a.status]">{{ a.status === 'pending' ? '待审核' : a.status === 'approved' ? '已通过' : '已拒绝' }}</span></td>
+              <td>{{ a.reviewed_by || '-' }}</td>
+              <td>{{ a.reject_reason || a.description || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="empty-state">暂无撤销申请</div>
+    </section>
+
     <!-- 生成 CRL -->
-    <section class="section" v-if="caStore.initialized">
+    <section class="section" v-if="caStore.initialized && authStore.role === 'admin'">
       <h3>生成 CRL</h3>
       <p class="desc">生成由根 CA 签名的 CRL，包含所有待处理的撤销记录。</p>
       <button @click="handleGenerate" :disabled="loading">
@@ -201,7 +248,7 @@ async function copyCRLPEM(pem: string) {
     </section>
 
     <!-- 当前 CRL -->
-    <section class="section">
+    <section class="section" v-if="authStore.role === 'admin'">
       <h3>当前 CRL</h3>
       <div v-if="crlStore.currentCRL?.crl_number">
         <div class="crl-meta">
@@ -260,7 +307,7 @@ async function copyCRLPEM(pem: string) {
     </section>
 
     <!-- CRL 历史记录 -->
-    <section class="section">
+    <section class="section" v-if="authStore.role === 'admin'">
       <h3>📋 CRL 历史记录</h3>
       <div v-if="historyLoading" class="loading">加载中...</div>
       <template v-else-if="history.length">
@@ -338,6 +385,7 @@ label {
   flex: 1;
   min-width: 180px;
 }
+.full-width { flex-basis: 100%; }
 input,
 select {
   padding: 0.5rem 0.75rem;
@@ -402,6 +450,10 @@ code {
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
 }
+.badge { padding: 0.18rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; }
+.badge-pending { background: #fff3cd; color: #856404; }
+.badge-approved { background: #d4edda; color: #155724; }
+.badge-rejected { background: #f8d7da; color: #721c24; }
 .empty { color: #888; font-style: italic; }
 .crl-actions { margin-top: 0.75rem; }
 .btn-sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; background: #555; }

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vue-tsc *)",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Bash(.venv/Scripts/python.exe -c \"from app.routers.ca import router; print\\('Routes:', [r.path for r in router.routes]\\)\")",
+      "Bash(tasklist)",
+      "Bash(wmic process *)",
+      "Bash(powershell -Command \"\\(Get-Process -Id 443508\\).Path\")",
+      "Bash(powershell -Command \"Stop-Process -Id 443508 -Force; Start-Sleep -Seconds 2\")",
+      "Bash(powershell -File start-windows.ps1)",
+      "Bash(curl -s http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"admin123\"}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s http://localhost:8000/api/ca/root-cert/45b76f80ea6905b5939657bd522f7792/download -H \"Authorization: Bearer $\\(curl -s http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"admin123\"}')",
+      "Bash(openssl x509 *)",
+      "Bash(/c/Users/86184/AppData/Local/Programs/Python/Python312/python.exe *)"
+    ]
+  }
+}

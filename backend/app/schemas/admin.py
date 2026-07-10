@@ -7,8 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-# 管理员角色
-ADMIN_ROLES = Literal["admin", "auditor", "operator"]
+# 账户角色：admin 为管理员账户，user 为普通用户账户
+ACCOUNT_ROLES = Literal["admin", "user"]
 
 
 class CreateAdminUserRequest(BaseModel):
@@ -24,9 +24,9 @@ class CreateAdminUserRequest(BaseModel):
         max_length=128,
         description="密码（至少 6 位）",
     )
-    role: ADMIN_ROLES = Field(
-        default="admin",
-        description="角色：admin / auditor / operator",
+    role: ACCOUNT_ROLES = Field(
+        default="user",
+        description="角色：admin / user",
     )
 
 

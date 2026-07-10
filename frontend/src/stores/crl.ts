@@ -24,6 +24,10 @@ export const useCRLStore = defineStore('crl', () => {
     return await crlApi.revoke(data)
   }
 
+  async function applyRevocation(data: { cert_serial_number: string; reason: string; description?: string }) {
+    return await crlApi.applyRevocation(data)
+  }
+
   async function generate() {
     return await crlApi.generate()
   }
@@ -38,5 +42,5 @@ export const useCRLStore = defineStore('crl', () => {
     return currentCRL.value
   }
 
-  return { currentCRL, revoke, generate, fetchCurrent }
+  return { currentCRL, revoke, applyRevocation, generate, fetchCurrent }
 })

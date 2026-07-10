@@ -12,16 +12,16 @@ async function handleLogout() {
 }
 
 const navItems = [
-  { to: '/', label: '仪表盘', icon: '📊' },
-  { to: '/ca', label: '根 CA', icon: '🔐' },
-  { to: '/cert', label: '用户证书', icon: '📜' },
-  { to: '/cert-apply', label: '证书申请', icon: '📝' },
-  { to: '/cert-audit', label: '证书审核', icon: '🔍' },
-  { to: '/crl', label: 'CRL', icon: '🚫' },
+  { to: '/', label: '仪表盘', icon: '📊', adminOnly: true },
+  { to: '/ca', label: '根 CA', icon: '🔐', adminOnly: true },
+  { to: '/multi-ca', label: '多级证书', icon: '🔗', adminOnly: true },
+  { to: '/cert', label: authStore.role === 'admin' ? '证书一览' : '我的证书', icon: '📜' },
+  { to: '/cert-apply', label: '证书申请', icon: '📝', userOnly: true },
+  { to: '/cert-audit', label: '申请审核', icon: '🔍', adminOnly: true },
+  { to: '/crl', label: authStore.role === 'admin' ? 'CRL 发布' : '撤销申请', icon: '🚫' },
   { to: '/verify', label: '证书验证', icon: '🔍' },
-
-  { to: '/admin-users', label: '管理员', icon: '👥' },
-  { to: '/settings', label: '系统设置', icon: '⚙️' },
+  { to: '/admin-users', label: '账户管理', icon: '👥', adminOnly: true },
+  { to: '/settings', label: '系统设置', icon: '⚙️', adminOnly: true },
 ]
 </script>
 
@@ -37,6 +37,7 @@ const navItems = [
       <nav class="sidebar-nav">
         <RouterLink
           v-for="item in navItems"
+          v-show="(!item.adminOnly || authStore.role === 'admin') && (!item.userOnly || authStore.role !== 'admin')"
           :key="item.to"
           :to="item.to"
           class="nav-link"

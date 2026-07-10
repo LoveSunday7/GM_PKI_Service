@@ -8,28 +8,13 @@ defineOptions({ name: 'CertVerifyPage' })
 
 const toast = useToast()
 const certPem = ref('')
-const issuerCertPem = ref('')
+const serialNumber = ref('')
 const crlPem = ref('')
+const showChain = ref(true)
 const loading = ref(false)
 
 const signResult = ref<CertVerifyResult | null>(null)
 const crlResult = ref<CertRevocationVerifyResult | null>(null)
-
-async function verifySignature() {
-  if (!certPem.value.trim() || !issuerCertPem.value.trim()) {
-    toast.error('请填写证书和上级证书 PEM')
-    return
-  }
-  loading.value = true
-  signResult.value = null
-  try {
-    signResult.value = await certApi.verify(certPem.value, issuerCertPem.value)
-  } catch (e: unknown) {
-    toast.error(formatError(e))
-  } finally {
-    loading.value = false
-  }
-}
 
 async function verifyRevocation() {
   if (!certPem.value.trim() || !crlPem.value.trim()) {
@@ -62,22 +47,24 @@ async function loadCurrentCRL() {
 }
 
 async function verifyAll() {
-  if (!certPem.value.trim()) {
-    toast.error('请先粘贴待验证的证书 PEM')
+  if (!certPem.value.trim() && !serialNumber.value.trim()) {
+    toast.error('请先粘贴待验证的证书 PEM 或输入序列号')
     return
   }
   loading.value = true
   signResult.value = null
   crlResult.value = null
   try {
-    if (issuerCertPem.value.trim()) {
-      signResult.value = await certApi.verify(certPem.value, issuerCertPem.value)
-    }
-    if (!crlPem.value.trim()) {
+    signResult.value = await certApi.verify({
+      cert_pem: certPem.value.trim() || undefined,
+      serial_number: serialNumber.value.trim() || undefined,
+      show_chain: showChain.value,
+    })
+    if (certPem.value.trim() && !crlPem.value.trim()) {
       const data = await crlApi.current()
       if ('crl_pem' in data) crlPem.value = data.crl_pem
     }
-    if (crlPem.value.trim()) {
+    if (certPem.value.trim() && crlPem.value.trim()) {
       crlResult.value = await certApi.verifyRevocation(certPem.value, crlPem.value)
     }
     toast.success('验证完成')
@@ -95,17 +82,17 @@ async function verifyAll() {
 
     <section class="section">
       <h3>待验证证书 PEM</h3>
+      <input v-model="serialNumber" class="serial-input" placeholder="也可以输入证书序列号直接验证" />
       <textarea v-model="certPem" rows="6" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+      <label class="check-row"><input v-model="showChain" type="checkbox" /> 查看完整证书链</label>
       <button class="btn btn-primary" :disabled="loading" @click="verifyAll">
         {{ loading ? '验证中...' : '综合验证' }}
       </button>
     </section>
 
-    <section class="section">
-      <h3>证书链验证</h3>
-      <textarea v-model="issuerCertPem" rows="5" placeholder="粘贴上级/根证书 PEM"></textarea>
-      <button class="btn" :disabled="loading" @click="verifySignature">验证证书链</button>
-      <div v-if="signResult" class="result" :class="signResult.valid ? 'result-ok' : 'result-fail'">
+    <section v-if="signResult" class="section">
+      <h3>验证结果</h3>
+      <div class="result" :class="signResult.valid ? 'result-ok' : 'result-fail'">
         <p><strong>{{ signResult.valid ? '证书链有效' : '证书链无效' }}</strong>：{{ signResult.details }}</p>
         <dl v-if="signResult.cert_subject" class="iv">
           <dt>证书主题</dt><dd>{{ signResult.cert_subject }}</dd>
@@ -114,6 +101,16 @@ async function verifyAll() {
           <dt>有效期</dt><dd>{{ signResult.not_before }} 至 {{ signResult.not_after }}</dd>
           <dt>当前有效</dt><dd>{{ signResult.in_validity_period ? '是' : '否' }}</dd>
         </dl>
+        <div v-if="signResult.chain?.length" class="chain-list">
+          <h4>完整证书链</h4>
+          <ol>
+            <li v-for="node in signResult.chain" :key="node.serial_number">
+              <strong>{{ node.cert_type === 'root' ? '根 CA' : node.cert_type === 'intermediate_ca' ? '中间 CA' : node.cert_type === 'sign' ? '签名证书' : '加密证书' }}</strong>
+              <code>{{ node.serial_number.slice(0, 18) }}...</code>
+              <span>{{ node.subject_dn }}</span>
+            </li>
+          </ol>
+        </div>
       </div>
     </section>
 
@@ -139,6 +136,9 @@ async function verifyAll() {
 .section { background: #fff; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .section h3 { margin-bottom: 0.75rem; font-size: 1.05rem; }
 textarea { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 0.8rem; font-family: monospace; resize: vertical; margin-bottom: 0.75rem; }
+.serial-input { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 0.9rem; margin-bottom: 0.75rem; }
+.check-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.75rem; font-size: 0.85rem; color: #555; }
+.check-row input { width: auto; }
 .btn { padding: 0.55rem 1.2rem; background: #1a1a2e; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-primary { background: #0f3460; }
@@ -152,4 +152,9 @@ textarea { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #d0d0d0; bord
 .iv-row { display: flex; gap: 0.75rem; align-items: flex-start; }
 .iv-row textarea { flex: 1; }
 .warn { color: #856404; }
+.chain-list { margin-top: 0.8rem; }
+.chain-list h4 { margin-bottom: 0.4rem; }
+.chain-list ol { margin-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.chain-list li { display: grid; grid-template-columns: 90px 150px 1fr; gap: 0.5rem; align-items: center; }
+.chain-list span { word-break: break-all; }
 </style>

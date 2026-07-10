@@ -1,6 +1,7 @@
 const BASE = '/api'
 const TOKEN_KEY = 'gm_pki_token'
 const USER_KEY = 'gm_pki_user'
+const ROLE_KEY = 'gm_pki_role'
 const DEFAULT_TIMEOUT = 30_000
 
 interface ApiErrorBody {
@@ -36,6 +37,7 @@ function getToken(): string | null {
 function clearAuth() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
+  localStorage.removeItem(ROLE_KEY)
 }
 
 function decodeJwtPayload(token: string): { exp?: number } | null {
@@ -72,7 +74,7 @@ async function request<T>(url: string, options?: RequestInit & { timeout?: numbe
   try {
     const res = await fetch(`${BASE}${url}`, { ...options, headers, signal: controller.signal })
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         clearAuth()
         onUnauthorized?.()
       }
@@ -148,6 +150,7 @@ export const caApi = {
         status: string
       }>
     >('/ca/root-cert'),
+  reset: () => request<{ success: boolean; message: string }>('/ca/reset', { method: 'POST' }),
   getRootCert: (serial: string) => request<Record<string, unknown>>(`/ca/root-cert/${serial}`),
   downloadRootCert: (serial: string) => download(`/ca/root-cert/${serial}/download`, `root_${serial}.pem`),
 }
@@ -165,7 +168,10 @@ export interface CertListItem {
 export interface CertDetail extends CertListItem {
   issuer_dn: string
   email?: string | null
+  issuer_cert_serial?: string | null
+  owner_username?: string | null
   signature_algorithm: string
+  encryption_algorithm: string
   not_before: string
   cert_pem: string
 }
@@ -180,6 +186,7 @@ export interface CertIssueResponse {
   serial_number?: string
   cert_pem?: string
   private_key_pem?: string
+  issuer_cert_serial?: string | null
 }
 
 export interface CertApplicationItem {
@@ -195,7 +202,18 @@ export interface CertApplicationItem {
   applied_by: string
   reviewed_by?: string | null
   issued_cert_serial?: string | null
+  issued_encrypt_cert_serial?: string | null
+  issuer_cert_serial?: string | null
+  signature_algorithm: string
+  encryption_algorithm: string
   created_at: string
+}
+
+export interface CertIssuerItem {
+  serial_number: string
+  subject_dn: string
+  issuer_type: 'root' | 'intermediate_ca'
+  display_name: string
 }
 
 export interface CertChainNode {
@@ -224,6 +242,7 @@ export interface CertVerifyResult {
   not_before: string
   not_after: string
   in_validity_period: boolean
+  chain?: CertChainNode[] | null
 }
 
 export interface CertRevocationVerifyResult {
@@ -267,6 +286,7 @@ export const certApi = {
     request<{ activities: Array<{ type: string; time: string; user: string; serial: string; detail: string }> }>(
       '/cert/activity',
     ),
+  issuers: () => request<CertIssuerItem[]>('/cert/issuers'),
   apply: (data: {
     user_name: string
     email?: string
@@ -277,6 +297,9 @@ export const certApi = {
     cert_type: string
     validity_days: number
     public_key_pem?: string
+    signature_algorithm?: string
+    encryption_algorithm?: string
+    issuer_cert_serial?: string
   }) =>
     request<{ success: boolean; message: string; application_id: string }>('/cert/apply', {
       method: 'POST',
@@ -304,10 +327,10 @@ export const certApi = {
     }),
   chain: (serial: string) =>
     request<CertChainResponse>(`/cert/${serial}/chain`),
-  verify: (certPem: string, issuerCertPem: string) =>
+  verify: (data: { cert_pem?: string; serial_number?: string; issuer_cert_pem?: string; show_chain?: boolean }) =>
     request<CertVerifyResult>('/cert/verify', {
       method: 'POST',
-      body: JSON.stringify({ cert_pem: certPem, issuer_cert_pem: issuerCertPem }),
+      body: JSON.stringify(data),
     }),
   verifyRevocation: (certPem: string, crlPem: string) =>
     request<CertRevocationVerifyResult>('/cert/verify-revocation', {
@@ -409,6 +432,18 @@ export interface AdminUserItem {
   created_at: string
 }
 
+export interface RevocationApplicationItem {
+  id: string
+  cert_serial_number: string
+  reason: string
+  description?: string | null
+  status: string
+  reject_reason?: string | null
+  applied_by: string
+  reviewed_by?: string | null
+  created_at: string
+}
+
 export const adminApi = {
   list: () => request<AdminUserItem[]>('/admin/users'),
   create: (data: { username: string; password: string; role: string }) =>
@@ -475,4 +510,29 @@ export const crlApi = {
       page: number
       page_size: number
     }>(`/crl/history?page=${page}&page_size=${pageSize}`),
+  applyRevocation: (data: { cert_serial_number: string; reason: string; description?: string }) =>
+    request<{ success: boolean; message: string; application_id: string }>('/crl/revoke-applications', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  revocationApplications: (params?: { status?: string; page?: number; page_size?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.status) qs.set('status', params.status)
+    if (params?.page) qs.set('page', String(params.page))
+    if (params?.page_size) qs.set('page_size', String(params.page_size))
+    const q = qs.toString()
+    return request<{ items: RevocationApplicationItem[]; total: number; page: number; page_size: number }>(
+      `/crl/revoke-applications${q ? `?${q}` : ''}`,
+    )
+  },
+  approveRevocation: (id: string) =>
+    request<{ success: boolean; message: string; application_id: string; cert_serial_number?: string }>(
+      `/crl/revoke-applications/${id}/approve`,
+      { method: 'POST', body: '{}' },
+    ),
+  rejectRevocation: (id: string, rejectReason: string) =>
+    request<{ success: boolean; message: string; application_id: string; cert_serial_number?: string }>(
+      `/crl/revoke-applications/${id}/reject`,
+      { method: 'POST', body: JSON.stringify({ reject_reason: rejectReason }) },
+    ),
 }

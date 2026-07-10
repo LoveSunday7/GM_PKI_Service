@@ -1,17 +1,23 @@
-"""根 CA 管理接口 — 初始化、查询、下载、撤销、续期."""
+"""根 CA 管理接口 — 初始化、查询、下载、撤销、续期、重置."""
 
 from __future__ import annotations
+
+import os as _os
 
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.models.ca_config import CAConfig
+from app.models.cert_application import CertApplication
+from app.models.crl import CRLPublish, CRLRevocation
+from app.models.revocation_application import RevocationApplication
 from app.models.root_cert import RootCert
+from app.models.user_cert import UserCert
 from app.schemas.ca import (
     CAInitRequest,
     CAInitResponse,
@@ -131,6 +137,36 @@ async def initialize_ca(payload: CAInitRequest, db: AsyncSession = Depends(get_d
         cert_path=cert_path,
         key_path=key_path,
     )
+
+
+@router.post("/reset")
+async def reset_ca(db: AsyncSession = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    """重置 CA — 清空所有证书、申请、撤销记录及密钥库文件，回到未初始化状态。"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # 删除所有证书相关数据（注意顺序：先删子表再删父表）
+    await db.execute(delete(RevocationApplication))
+    await db.execute(delete(CRLRevocation))
+    await db.execute(delete(CRLPublish))
+    await db.execute(delete(CertApplication))
+    await db.execute(delete(UserCert))
+    await db.execute(delete(RootCert))
+
+    # 重置 CA 配置
+    await db.execute(delete(CAConfig))
+
+    # 清空密钥库文件
+    keystore_dir = settings.keystore_dir
+    if _os.path.isdir(keystore_dir):
+        for fname in _os.listdir(keystore_dir):
+            fpath = _os.path.join(keystore_dir, fname)
+            if _os.path.isfile(fpath):
+                _os.remove(fpath)
+
+    await db.commit()
+    logger.warning("管理员 %s 重置了 CA，所有证书数据已清空", _user.username)
+    return {"success": True, "message": "CA 已重置，所有证书和密钥库文件已清空"}
 
 
 @router.get("/root-cert", response_model=list[RootCertListItem])

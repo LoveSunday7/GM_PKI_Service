@@ -28,7 +28,11 @@ async function handleLogin() {
     await authStore.login(username.value.trim(), password.value)
     // 登录成功后跳转到原始目标页或首页
     const redirect = route.query.redirect as string | undefined
-    router.replace(redirect || { name: 'Dashboard' })
+    if (redirect) {
+      router.replace(redirect)
+    } else {
+      router.replace(authStore.role === 'admin' ? { name: 'Dashboard' } : { name: 'UserCert' })
+    }
   } catch (e: unknown) {
     errorMsg.value = e instanceof Error ? e.message : '登录失败，请检查用户名和密码'
   } finally {

@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 import { certApi } from '@/api'
 import { useCAStore } from '@/stores/ca'
 import { useCRLStore } from '@/stores/crl'
+import { useAuthStore } from '@/stores/auth'
 
 defineOptions({ name: 'DashboardPage' })
 
 const router = useRouter()
+const authStore = useAuthStore()
 const caStore = useCAStore()
 const crlStore = useCRLStore()
 
@@ -56,12 +58,15 @@ function timelineIcon(type: string) {
       <!-- 快捷操作 -->
       <div class="quick-actions">
         <button class="qa-btn qa-issue" @click="goTo('/cert')">
-          <span class="qa-icon">📜</span> 签发证书
+          <span class="qa-icon">📜</span> {{ authStore.role === 'admin' ? '证书一览' : '我的证书' }}
+        </button>
+        <button v-if="authStore.role !== 'admin'" class="qa-btn qa-crl" @click="goTo('/cert-apply')">
+          <span class="qa-icon">📝</span> 申请证书
         </button>
         <button class="qa-btn qa-revoke" @click="goTo('/crl')">
           <span class="qa-icon">🚫</span> 撤销证书
         </button>
-        <button class="qa-btn qa-crl" @click="goTo('/crl')">
+        <button v-if="authStore.role === 'admin'" class="qa-btn qa-crl" @click="goTo('/crl')">
           <span class="qa-icon">📋</span> 生成 CRL
         </button>
       </div>
